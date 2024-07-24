@@ -1,0 +1,22 @@
+{
+  "name": "omic-file-transfer-electron-app",
+  "version": "1.0.0",
+  "description": "Enables users to transfer large files securely.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/assaydepot/omic-file-transfer-electron-app.git"
+  },
+  "author": "Robert Matthews",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/assaydepot/omic-file-transfer-electron-app/issues"
+  },
+  "homepage": "https://github.com/assaydepot/omic-file-transfer-electron-app#readme",
+  "devDependencies": {
+    "electron": "^31.2.1"
+  }
+}
