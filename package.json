@@ -18,5 +18,10 @@
   "homepage": "https://github.com/assaydepot/omic-file-transfer-electron-app#readme",
   "devDependencies": {
     "electron": "^31.2.1"
+  },
+  "dependencies": {
+    "aws-sdk": "^2.1663.0",
+    "dotenv": "^16.4.5",
+    "ssh2-sftp-client": "^10.0.3"
   }
 }

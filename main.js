@@ -1,5 +1,6 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
+const uploadFile = require('./uploadFile'); // Ensure this path is correct
 
 const createWindow = () => {
   const win = new BrowserWindow({
@@ -7,6 +8,8 @@ const createWindow = () => {
     height: 600,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: true, // Enable Node.js integration
+      contextIsolation: false, // Disable context isolation
     },
   });
 
@@ -23,4 +26,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+ipcMain.on('upload-file', (event, filePath) => {
+  uploadFile(filePath);
 });
