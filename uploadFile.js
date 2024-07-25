@@ -2,7 +2,6 @@ require('dotenv').config();
 const AWS = require('aws-sdk');
 const fs = require('fs');
 const path = require('path');
-const { ipcMain } = require('electron');
 
 // Configure AWS SDK
 const s3 = new AWS.S3({
@@ -11,7 +10,9 @@ const s3 = new AWS.S3({
   region: process.env.AWS_REGION,
 });
 
-async function uploadFile(localPath) {
+async function uploadFile(localPath, event) {
+  console.log('Uploading file:', localPath);
+
   const fileContent = fs.readFileSync(localPath);
   const remotePath = path.basename(localPath);
 
@@ -26,14 +27,14 @@ async function uploadFile(localPath) {
 
     upload.on('httpUploadProgress', (evt) => {
       const progress = Math.round((evt.loaded / evt.total) * 100);
-      ipcMain.emit('upload-progress', progress);
+      event.reply('upload-progress', progress);
     });
 
     const data = await upload.promise();
     console.log('File uploaded successfully', data.Location);
   } catch (err) {
     console.error('Error uploading file', err);
-    ipcMain.emit('upload-error', err.message);
+    event.reply('upload-error', err.message);
   }
 }
 

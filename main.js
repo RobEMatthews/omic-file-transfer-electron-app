@@ -29,5 +29,5 @@ app.on('window-all-closed', () => {
 });
 
 ipcMain.on('upload-file', (event, filePath) => {
-  uploadFile(filePath);
+  uploadFile(filePath, event);
 });
