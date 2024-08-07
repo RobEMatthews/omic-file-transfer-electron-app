@@ -1,13 +1,15 @@
-
 const { ipcRenderer } = require('electron');
 
 const dropArea = document.getElementById('dropArea');
 const fileInput = document.getElementById('fileInput');
 const uploadButton = document.getElementById('uploadButton');
 const uploadProgress = document.getElementById('uploadProgress');
+const uploadSpeedDisplay = document.getElementById('uploadSpeed');
 const fileListItems = document.getElementById('fileListItems');
 
 let filesToUpload = [];
+let currentUploadIndex = 0;
+let isUploading = false;
 
 function handleFiles(files) {
   for (let i = 0; i < files.length; i++) {
@@ -20,14 +22,34 @@ function handleFiles(files) {
       removeButton.className = 'btn btn-danger btn-sm';
       removeButton.textContent = 'Remove';
       removeButton.addEventListener('click', () => {
+        ipcRenderer.send('cancel-upload', files[i].path);
         filesToUpload = filesToUpload.filter(file => file.path !== files[i].path);
         listItem.remove();
+        if (currentUploadIndex === filesToUpload.length) {
+          resetProgress(); // Reset progress bar and speed display when the current upload is canceled
+        }
       });
 
       listItem.appendChild(removeButton);
       fileListItems.appendChild(listItem);
       filesToUpload.push(files[i]);
     }
+  }
+}
+
+function resetProgress() {
+  uploadProgress.style.width = '0%';
+  uploadProgress.setAttribute('aria-valuenow', 0);
+  uploadSpeedDisplay.textContent = 'Upload Speed: 0 MB/s';
+}
+
+function startNextUpload() {
+  if (currentUploadIndex < filesToUpload.length) {
+    isUploading = true;
+    ipcRenderer.send('upload-file', filesToUpload[currentUploadIndex].path);
+  } else {
+    isUploading = false;
+    resetProgress();
   }
 }
 
@@ -43,6 +65,7 @@ dropArea.addEventListener('dragover', (event) => {
 dropArea.addEventListener('dragleave', () => {
   dropArea.classList.remove('hover');
 });
+
 dropArea.addEventListener('drop', (event) => {
   event.preventDefault();
   dropArea.classList.remove('hover');
@@ -54,19 +77,28 @@ fileInput.addEventListener('change', () => {
 });
 
 uploadButton.addEventListener('click', () => {
-  uploadProgress.style.width = '0%';
-  uploadProgress.setAttribute('aria-valuenow', 0);
-
-  filesToUpload.forEach(file => {
-    ipcRenderer.send('upload-file', file.path);
-  });
+  if (!isUploading) {
+    currentUploadIndex = 0;
+    startNextUpload();
+  }
 });
 
-ipcRenderer.on('upload-progress', (event, progress) => {
+ipcRenderer.on('upload-progress', (event, { progress, speed }) => {
   uploadProgress.style.width = `${progress}%`;
   uploadProgress.setAttribute('aria-valuenow', progress);
+  const speedMBPerSecond = speed / (1024 * 1024); // Convert bytes per second to MB per second
+  uploadSpeedDisplay.textContent = `Upload Speed: ${speedMBPerSecond.toFixed(2)} MB/s`; // Display speed in MB/s
+
+  if (progress === 100) {
+    currentUploadIndex++;
+    startNextUpload();
+  }
 });
 
 ipcRenderer.on('upload-error', (event, errorMessage) => {
   console.error(`Upload error: ${errorMessage}`);
+  alert(`Upload error: ${errorMessage}`);
+  currentUploadIndex++;
+  startNextUpload();
 });
+

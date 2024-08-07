@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-const uploadFile = require('./uploadFile'); // Ensure this path is correct
+const uploadFile = require('./uploadFile');
+
+const uploadControllers = new Map(); // Initialize the map
 
 const createWindow = () => {
   const win = new BrowserWindow({
@@ -29,5 +31,16 @@ app.on('window-all-closed', () => {
 });
 
 ipcMain.on('upload-file', (event, filePath) => {
-  uploadFile(filePath, event);
+  const abortController = new AbortController();
+  uploadControllers.set(filePath, abortController);
+  uploadFile(filePath, event, abortController);
 });
+
+ipcMain.on('cancel-upload', (event, filePath) => { // Corrected event name
+  const abortController = uploadControllers.get(filePath);
+  if (abortController) {
+    abortController.abort();
+    uploadControllers.delete(filePath);
+  }
+});
+

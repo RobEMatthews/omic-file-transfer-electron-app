@@ -10,7 +10,7 @@ const s3 = new AWS.S3({
   region: process.env.AWS_REGION,
 });
 
-async function uploadFile(localPath, event) {
+async function uploadFile(localPath, event, abortController) {
   console.log('Uploading file:', localPath);
 
   const fileContent = fs.readFileSync(localPath);
@@ -25,9 +25,20 @@ async function uploadFile(localPath, event) {
   try {
     const upload = s3.upload(params);
 
+    let startTime = Date.now();
+
     upload.on('httpUploadProgress', (evt) => {
       const progress = Math.round((evt.loaded / evt.total) * 100);
-      event.reply('upload-progress', progress);
+      const currentTime = Date.now();
+      const elapsedTime = (currentTime - startTime) / 1000; // in seconds
+      const speed = evt.loaded / elapsedTime; // bytes per second
+
+      event.reply('upload-progress', { progress, speed });
+    });
+
+    abortController.signal.addEventListener('abort', () => {
+      upload.abort();
+      event.reply('upload-error', 'Upload aborted by user.');
     });
 
     const data = await upload.promise();
@@ -39,3 +50,4 @@ async function uploadFile(localPath, event) {
 }
 
 module.exports = uploadFile;
+
