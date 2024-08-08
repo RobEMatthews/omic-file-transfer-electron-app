@@ -10,8 +10,8 @@ const createWindow = () => {
     height: 600,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: true, // Enable Node.js integration
-      contextIsolation: false, // Disable context isolation
+      nodeIntegration: false, // Disable Node.js integration
+      contextIsolation: true, // Enable context isolation
     },
   });
 
@@ -36,7 +36,7 @@ ipcMain.on('upload-file', (event, filePath) => {
   uploadFile(filePath, event, abortController);
 });
 
-ipcMain.on('cancel-upload', (event, filePath) => { // Corrected event name
+ipcMain.on('cancel-upload', (event, filePath) => {
   const abortController = uploadControllers.get(filePath);
   if (abortController) {
     abortController.abort();

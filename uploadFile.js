@@ -19,11 +19,11 @@ async function uploadFile(localPath, event, abortController) {
   const params = {
     Bucket: process.env.AWS_S3_BUCKET,
     Key: remotePath,
-    Body: fileContent
+    Body: fileContent,
   };
 
   try {
-    const upload = s3.upload(params);
+    const upload = s3.upload(params, { partSize: 5 * 1024 * 1024, queueSize: 10 }); // Multi-part upload settings
 
     let startTime = Date.now();
 
@@ -43,6 +43,7 @@ async function uploadFile(localPath, event, abortController) {
 
     const data = await upload.promise();
     console.log('File uploaded successfully', data.Location);
+    event.reply('upload-success', remotePath); // Notify success
   } catch (err) {
     console.error('Error uploading file', err);
     event.reply('upload-error', err.message);
@@ -50,4 +51,5 @@ async function uploadFile(localPath, event, abortController) {
 }
 
 module.exports = uploadFile;
+
 

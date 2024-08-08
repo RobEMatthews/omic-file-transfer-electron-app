@@ -1,5 +1,3 @@
-const { ipcRenderer } = require('electron');
-
 const dropArea = document.getElementById('dropArea');
 const fileInput = document.getElementById('fileInput');
 const uploadButton = document.getElementById('uploadButton');
@@ -10,6 +8,7 @@ const fileListItems = document.getElementById('fileListItems');
 let filesToUpload = [];
 let currentUploadIndex = 0;
 let isUploading = false;
+let activeUploadPath = null; // Track the currently uploading file path
 
 function handleFiles(files) {
   for (let i = 0; i < files.length; i++) {
@@ -22,12 +21,12 @@ function handleFiles(files) {
       removeButton.className = 'btn btn-danger btn-sm';
       removeButton.textContent = 'Remove';
       removeButton.addEventListener('click', () => {
-        ipcRenderer.send('cancel-upload', files[i].path);
+        if (activeUploadPath === files[i].path) {
+	  window.api.cancelUpload(files[i].path);	
+          resetProgress(); // Reset progress immediately when canceling an active upload
+        }
         filesToUpload = filesToUpload.filter(file => file.path !== files[i].path);
         listItem.remove();
-        if (currentUploadIndex === filesToUpload.length) {
-          resetProgress(); // Reset progress bar and speed display when the current upload is canceled
-        }
       });
 
       listItem.appendChild(removeButton);
@@ -41,14 +40,16 @@ function resetProgress() {
   uploadProgress.style.width = '0%';
   uploadProgress.setAttribute('aria-valuenow', 0);
   uploadSpeedDisplay.textContent = 'Upload Speed: 0 MB/s';
+  isUploading = false;
+  activeUploadPath = null; // Clear the active upload path
 }
 
 function startNextUpload() {
   if (currentUploadIndex < filesToUpload.length) {
     isUploading = true;
-    ipcRenderer.send('upload-file', filesToUpload[currentUploadIndex].path);
+    activeUploadPath = filesToUpload[currentUploadIndex].path;
+    window.api.uploadFile(activeUploadPath);
   } else {
-    isUploading = false;
     resetProgress();
   }
 }
@@ -83,7 +84,9 @@ uploadButton.addEventListener('click', () => {
   }
 });
 
-ipcRenderer.on('upload-progress', (event, { progress, speed }) => {
+window.api.onUploadProgress((event, { progress, speed }) => {
+  if (!isUploading || activeUploadPath !== filesToUpload[currentUploadIndex].path) return; // Ignore updates if not uploading or if the file is not active
+
   uploadProgress.style.width = `${progress}%`;
   uploadProgress.setAttribute('aria-valuenow', progress);
   const speedMBPerSecond = speed / (1024 * 1024); // Convert bytes per second to MB per second
@@ -95,7 +98,13 @@ ipcRenderer.on('upload-progress', (event, { progress, speed }) => {
   }
 });
 
-ipcRenderer.on('upload-error', (event, errorMessage) => {
+window.api.onUploadSuccess((event, fileName) => {
+  alert(`File "${fileName}" uploaded successfully!`);
+  currentUploadIndex++;
+  startNextUpload();
+});
+
+window.api.onUploadError((event, errorMessage) => {
   console.error(`Upload error: ${errorMessage}`);
   alert(`Upload error: ${errorMessage}`);
   currentUploadIndex++;
