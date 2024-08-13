@@ -21,7 +21,9 @@
   },
   "dependencies": {
     "aws-sdk": "^2.1663.0",
+    "axios": "^1.7.3",
     "dotenv": "^16.4.5",
+    "express": "^4.19.2",
     "ssh2-sftp-client": "^10.0.3"
   }
 }
