@@ -55,28 +55,35 @@ function handleCallback(callbackUrl, win) {
 }
 
 function exchangeCodeForToken(code, win) {
-  axios.post(process.env.TOKEN_URL, {
+  const requestData = {
     grant_type: 'authorization_code',
     code: code,
     client_id: process.env.CLIENT_ID,
     client_secret: process.env.CLIENT_SECRET,
     redirect_uri: `http://localhost:3000/callback`
-  })
-  .then(response => {
-    console.log('Access Token:', response.data.access_token);
-    const refreshToken = response.data.refresh_token;
-    const expiresIn = response.data.expires_in;
+  };
 
-    // Store tokens locally
-    storeTokens(response.data.access_token, refreshToken, expiresIn);
+  console.log('Requesting token with data:', requestData); // Log request data
 
-    if (win) {
-      win.loadFile('index.html');
-    }
-  })
-  .catch(error => {
-    handleError(error);
-  });
+  axios.post(process.env.TOKEN_URL, requestData)
+    .then(response => {
+      console.log('Token Response:', response.data); // Log response data
+
+      const accessToken = response.data.access_token;
+      const refreshToken = response.data.refresh_token;
+      const expiresIn = response.data.expires_in;
+
+      // Store tokens locally
+      storeTokens(accessToken, refreshToken, expiresIn);
+
+      if (win) {
+        win.loadFile('index.html');
+      }
+    })
+    .catch(error => {
+      console.error('Error in token request:', error.response ? error.response.data : error.message);
+      handleError(error);
+    });
 }
 
 function storeTokens(accessToken, refreshToken, expiresIn) {
@@ -89,16 +96,21 @@ function storeTokens(accessToken, refreshToken, expiresIn) {
 function loadTokens() {
   if (fs.existsSync(TOKEN_STORAGE_PATH)) {
     const tokens = JSON.parse(fs.readFileSync(TOKEN_STORAGE_PATH, 'utf8'));
+    console.log('Loaded Tokens:', tokens); // Debugging log
     return tokens;
   }
+  console.log('No tokens found.'); // Debugging log
   return null;
 }
 
 function isAccessTokenValid(tokens) {
-  return tokens && tokens.expiryTime && Date.now() < tokens.expiryTime;
+  const isValid = tokens && tokens.expiryTime && Date.now() < tokens.expiryTime;
+  console.log('Access Token Valid:', isValid); // Debugging log
+  return isValid;
 }
 
 function refreshAccessToken(refreshToken, win) {
+  console.log('Attempting to refresh access token.'); // Debugging log
   axios.post(process.env.TOKEN_URL, {
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
@@ -108,14 +120,12 @@ function refreshAccessToken(refreshToken, win) {
   .then(response => {
     console.log('New Access Token:', response.data.access_token);
     storeTokens(response.data.access_token, response.data.refresh_token, response.data.expires_in);
-
     if (win) {
       win.loadFile('index.html');
     }
   })
   .catch(error => {
     console.error('Failed to refresh token:', error);
-    // If refresh fails, redirect to login
     createWindow();
   });
 }
