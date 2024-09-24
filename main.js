@@ -5,6 +5,7 @@ const fs = require('fs');
 const axios = require('axios');
 const express = require('express');
 const uploadFile = require('./uploadFile');
+const { listFiles, deleteFiles } = require('./fileManager');
 
 const uploadControllers = new Map();
 const TOKEN_STORAGE_PATH = path.join(__dirname, 'tokens.json');
@@ -55,35 +56,38 @@ function handleCallback(callbackUrl, win) {
 }
 
 function exchangeCodeForToken(code, win) {
-  const requestData = {
-    grant_type: 'authorization_code',
-    code: code,
-    client_id: process.env.CLIENT_ID,
-    client_secret: process.env.CLIENT_SECRET,
-    redirect_uri: `http://localhost:3000/callback`
-  };
+  const requestData = new URLSearchParams();
+  requestData.append('grant_type', 'authorization_code');
+  requestData.append('code', code);
+  requestData.append('client_id', process.env.CLIENT_ID);
+  requestData.append('client_secret', process.env.CLIENT_SECRET);
+  requestData.append('redirect_uri', `http://localhost:3000/callback`);
 
   console.log('Requesting token with data:', requestData); // Log request data
 
-  axios.post(process.env.TOKEN_URL, requestData)
-    .then(response => {
-      console.log('Token Response:', response.data); // Log response data
+  axios.post(process.env.TOKEN_URL, requestData, {
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
+  })
+  .then(response => {
+    console.log('Token Response:', response.data); // Log response data
 
-      const accessToken = response.data.access_token;
-      const refreshToken = response.data.refresh_token;
-      const expiresIn = response.data.expires_in;
+    const accessToken = response.data.access_token;
+    const refreshToken = response.data.refresh_token;
+    const expiresIn = response.data.expires_in;
+    
+    // Store tokens locally
+    storeTokens(accessToken, refreshToken, expiresIn);
 
-      // Store tokens locally
-      storeTokens(accessToken, refreshToken, expiresIn);
-
-      if (win) {
-        win.loadFile('index.html');
-      }
-    })
-    .catch(error => {
-      console.error('Error in token request:', error.response ? error.response.data : error.message);
-      handleError(error);
-    });
+    if (win) {
+      win.loadFile('index.html');
+    }
+  })
+  .catch(error => {
+    console.error('Error in token request:', error.response ? error.response.data : error.message);
+    handleError(error);
+  });
 }
 
 function storeTokens(accessToken, refreshToken, expiresIn) {
@@ -196,3 +200,19 @@ ipcMain.on('cancel-upload', (event, filePath) => {
     uploadControllers.delete(filePath);
   }
 });
+
+ipcMain.handle('list-files', async (event) => {
+    const tokens = loadTokens();
+    if (!tokens || !isAccessTokenValid(tokens)) throw new Error('Invalid or expired token');
+    
+    return await listFiles(tokens.accessToken);
+});
+
+ipcMain.handle('delete-file', async (event, fileId) => {
+    const tokens = loadTokens();
+    if (!tokens || !isAccessTokenValid(tokens)) throw new Error('Invalid or expired token');
+    
+    await deleteFile(fileId, tokens.accessToken);
+});
+
+

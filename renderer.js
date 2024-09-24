@@ -111,3 +111,44 @@ window.api.onUploadError((event, errorMessage) => {
   startNextUpload();
 });
 
+async function fetchUploadedFiles() {
+    try {
+        const files = await window.api.listFiles(); // Invoke the list-files handler
+        const uploadedFilesList = document.getElementById('uploadedFilesList');
+        uploadedFilesList.innerHTML = ''; // Clear existing list
+
+        files.forEach(file => {
+            const listItem = document.createElement('li');
+            listItem.className = 'list-group-item d-flex justify-content-between align-items-center';
+            listItem.textContent = file.name;
+
+            const deleteButton = document.createElement('button');
+            deleteButton.className = 'btn btn-danger btn-sm';
+            deleteButton.textContent = 'Delete';
+            deleteButton.addEventListener('click', async () => {
+                await handleDeleteFile(file.id);
+                alert(`File "${file.name}" deleted successfully!`);
+                fetchUploadedFiles(); // Refresh the file list
+            });
+
+            listItem.appendChild(deleteButton);
+            uploadedFilesList.appendChild(listItem);
+        });
+    } catch (error) {
+        console.error('Error fetching files:', error.message);
+    }
+}
+
+// Handle file deletion
+async function handleDeleteFile(fileId) {
+    try {
+        await window.api.deleteFile(fileId); // Invoke the delete-file handler
+    } catch (error) {
+        console.error('Error deleting file:', error.message);
+    }
+}
+
+// Call fetchUploadedFiles on page load to populate the file list
+fetchUploadedFiles();
+
+
