@@ -5,7 +5,7 @@ const fs = require('fs');
 const axios = require('axios');
 const express = require('express');
 const uploadFile = require('./uploadFile');
-const { listFiles, deleteFiles } = require('./fileManager');
+const { listFiles, deleteFile } = require('./fileManager');
 
 const uploadControllers = new Map();
 const TOKEN_STORAGE_PATH = path.join(__dirname, 'tokens.json');
@@ -91,7 +91,8 @@ function exchangeCodeForToken(code, win) {
 }
 
 function storeTokens(accessToken, refreshToken, expiresIn) {
-  const expiryTime = Date.now() + expiresIn * 1000; // Calculate expiry time in milliseconds
+  //const defaultExpiryTime = 3600;
+  const expiryTime = expiresIn ? Date.now() + expiresIn * 1000 : Date.now() //+ defaultExpiryTime * 1000; // Calculate expiry time in milliseconds
   const tokens = { accessToken, refreshToken, expiryTime };
   fs.writeFileSync(TOKEN_STORAGE_PATH, JSON.stringify(tokens), 'utf8');
   console.log('Tokens stored locally.');
@@ -111,6 +112,7 @@ function isAccessTokenValid(tokens) {
   const isValid = tokens && tokens.expiryTime && Date.now() < tokens.expiryTime;
   console.log('Access Token Valid:', isValid); // Debugging log
   return isValid;
+  //return true;
 }
 
 function refreshAccessToken(refreshToken, win) {
@@ -188,9 +190,15 @@ app.whenReady().then(() => {
 });
 
 ipcMain.on('upload-file', (event, filePath) => {
-  const abortController = new AbortController();
-  uploadControllers.set(filePath, abortController);
-  uploadFile(filePath, event, abortController);
+    const tokens = loadTokens();
+    if (!tokens || !isAccessTokenValid(tokens)) {
+        console.error('Invalid or expired token');
+        event.reply('upload-error', 'Invalid or expired token');
+        return;
+    }
+    const abortController = new AbortController();
+    uploadControllers.set(filePath, abortController);
+    uploadFile(filePath, event, abortController, tokens.accessToken);
 });
 
 ipcMain.on('cancel-upload', (event, filePath) => {

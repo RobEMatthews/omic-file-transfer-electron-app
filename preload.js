@@ -6,8 +6,8 @@ contextBridge.exposeInMainWorld('api', {
   cancelUpload: (filePath) => ipcRenderer.send('cancel-upload', filePath),
   onUploadProgress: (callback) => ipcRenderer.on('upload-progress', callback),
   onUploadSuccess: (callback) => ipcRenderer.on('upload-success', callback),
-  onUploadError: (callback) => ipcRenderer.on('upload-error', callback)
+  onUploadError: (callback) => ipcRenderer.on('upload-error', callback),
   listFiles: () => ipcRenderer.invoke('list-files'),
-  deleteFile: (fileId) => ipcRenderer.invoke('delete-file', fileId);
+  deleteFile: (fileId) => ipcRenderer.invoke('delete-file', fileId)
 });
 
