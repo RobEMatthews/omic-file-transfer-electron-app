@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
-
 const MAX_UPLOAD_SPEED_BPS = 100 * 1024 * 1024; // 100 MB/s
 
 async function uploadFile(localPath, event, abortController, accessToken) {
@@ -66,7 +65,7 @@ async function uploadFile(localPath, event, abortController, accessToken) {
 
         // Create a storage object after successful upload
         console.log(`Creating storage object for ${path.basename(localPath)}...`);
-        await axios.post('https://app.staging.scientist.com/storage', {
+        await axios.post('https://app.staging.scientist.com/api/v2/storage', {
             storage_object: { name: path.basename(localPath), s3_key: path.basename(localPath) }
         }, {
             headers: { Authorization: `Bearer ${accessToken}` }

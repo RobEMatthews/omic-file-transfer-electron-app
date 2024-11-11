@@ -61,7 +61,7 @@ function exchangeCodeForToken(code, win) {
   requestData.append('code', code);
   requestData.append('client_id', process.env.CLIENT_ID);
   requestData.append('client_secret', process.env.CLIENT_SECRET);
-  requestData.append('redirect_uri', `http://localhost:3000/callback`);
+  requestData.append('redirect_uri', process.env.REDIRECT_URI);
 
   console.log('Requesting token with data:', requestData); // Log request data
 
@@ -91,8 +91,10 @@ function exchangeCodeForToken(code, win) {
 }
 
 function storeTokens(accessToken, refreshToken, expiresIn) {
-  //const defaultExpiryTime = 3600;
-  const expiryTime = expiresIn ? Date.now() + expiresIn * 1000 : Date.now() //+ defaultExpiryTime * 1000; // Calculate expiry time in milliseconds
+  const defaultExpiryTime = 3600; // 1 hour in seconds
+  const expiryTime = expiresIn 
+    ? Date.now() + expiresIn * 1000 
+    : Date.now() + defaultExpiryTime * 1000;
   const tokens = { accessToken, refreshToken, expiryTime };
   fs.writeFileSync(TOKEN_STORAGE_PATH, JSON.stringify(tokens), 'utf8');
   console.log('Tokens stored locally.');
@@ -155,7 +157,7 @@ app.whenReady().then(() => {
     const code = req.query.code;
     if (code) {
       console.log('Authorization Code:', code);
-      res.send('Authorization successful! You can close this window.');
+      res.redirect('/');
     } else {
       res.send('Authorization failed. No code received.');
     }
@@ -179,7 +181,7 @@ app.whenReady().then(() => {
     });
     win.loadFile('index.html');
   } else if (tokens && tokens.refreshToken) {
-    refreshAccessToken(tokens.refreshToken);
+      refreshAccessToken(tokens.refreshToken);
   } else {
     createWindow();
   }
@@ -192,9 +194,9 @@ app.whenReady().then(() => {
 ipcMain.on('upload-file', (event, filePath) => {
     const tokens = loadTokens();
     if (!tokens || !isAccessTokenValid(tokens)) {
-        console.error('Invalid or expired token');
-        event.reply('upload-error', 'Invalid or expired token');
-        return;
+      console.error('Invalid or expired token');
+      event.reply('upload-error', 'Invalid or expired token');
+      return;
     }
     const abortController = new AbortController();
     uploadControllers.set(filePath, abortController);
@@ -210,17 +212,52 @@ ipcMain.on('cancel-upload', (event, filePath) => {
 });
 
 ipcMain.handle('list-files', async (event) => {
-    const tokens = loadTokens();
-    if (!tokens || !isAccessTokenValid(tokens)) throw new Error('Invalid or expired token');
+  const tokens = loadTokens();
+  if (!tokens || !isAccessTokenValid(tokens)) throw new Error('Invalid or expired token');
     
-    return await listFiles(tokens.accessToken);
+  return await listFiles(tokens.accessToken);
 });
 
 ipcMain.handle('delete-file', async (event, fileId) => {
-    const tokens = loadTokens();
-    if (!tokens || !isAccessTokenValid(tokens)) throw new Error('Invalid or expired token');
+  const tokens = loadTokens();
+  if (!tokens || !isAccessTokenValid(tokens)) throw new Error('Invalid or expired token');
     
-    await deleteFile(fileId, tokens.accessToken);
+  await deleteFile(fileId, tokens.accessToken);
 });
 
+ipcMain.on('logout', (event) => {
+  const tokenPath = path.join(__dirname, 'tokens.json');
+   
+  // Clear tokens
+  if (fs.existsSync(tokenPath)) {
+    fs.unlinkSync(tokenPath); // Delete tokens.json
+    console.log('Tokens cleared.');
+  }
+
+  const win = BrowserWindow.getFocusedWindow();
+   
+  //if (win) {
+   // win.close();
+   // createWindow();
+ // }
+
+  if (win) {
+    // Clear any session or cookies stored in the current window
+    win.webContents.session.clearStorageData().then(() => {
+      console.log('Session storage cleared.');
+
+      // Close the current window
+      win.close();
+
+      // Create a new window to start fresh login flow
+      createWindow();
+    }).catch(error => {
+      console.error('Error clearing session data:', error);
+      // Proceed to close and create window even if clearing session fails
+      win.close();
+      createWindow();
+    });
+  }
+
+});
 
