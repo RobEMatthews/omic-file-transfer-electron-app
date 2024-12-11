@@ -37,6 +37,13 @@ function handleFiles(files) {
   }
 }
 
+function updateUploadProgress(progress, speed) {
+  uploadProgress.style.width = `${progress}%`;
+  uploadProgress.setAttribute('aria-valuenow', progress);
+  const speedMBPerSecond = speed / (1024 * 1024);
+  uploadSpeedDisplay.textContent = `Upload Speed: ${speedMBPerSecond.toFixed(2)} MB/s`;
+}
+
 function resetProgress() {
   uploadProgress.style.width = '0%';
   uploadProgress.setAttribute('aria-valuenow', 0);
@@ -46,13 +53,15 @@ function resetProgress() {
 }
 
 function startNextUpload() {
-  if (currentUploadIndex < filesToUpload.length) {
-    isUploading = true;
-    activeUploadPath = filesToUpload[currentUploadIndex].path;
-    window.api.uploadFile(activeUploadPath);
-  } else {
-    resetProgress();
-  }
+    if (currentUploadIndex < filesToUpload.length) {
+        resetProgress(); 
+        activeUploadPath = filesToUpload[currentUploadIndex].path;
+        window.api.uploadFile(activeUploadPath);
+    } else {
+        resetProgress();
+        filesToUpload = []; 
+        fileListItems.innerHTML = ''; 
+    }
 }
 
 dropArea.addEventListener('click', () => {
@@ -99,10 +108,11 @@ window.api.onUploadProgress((event, { progress, speed }) => {
   }
 });
 
-window.api.onUploadSuccess((event, fileName) => {
-  alert(`File "${fileName}" uploaded successfully!`);
-  currentUploadIndex++;
-  startNextUpload();
+window.api.onUploadSuccess((event, fileInfo) => {
+    alert(`File "${fileInfo.name}" uploaded successfully!`);
+    fetchUploadedFiles(); // Refresh uploaded files list
+    currentUploadIndex++;
+    startNextUpload();
 });
 
 window.api.onUploadError((event, errorMessage) => {
@@ -140,12 +150,28 @@ async function fetchUploadedFiles() {
   }
 }
 
-// Handle file deletion
 async function handleDeleteFile(fileId) {
   try {
-    await window.api.deleteFile(fileId); // Invoke the delete-file handler
+    const result = await window.api.deleteFile(fileId);
+    if (result.success) {
+      // Find and remove the list item with the matching file ID
+      const uploadedFilesList = document.getElementById('uploadedFilesList');
+      const listItemToRemove = Array.from(uploadedFilesList.children).find(
+        item => item.dataset.fileId === fileId
+      );
+
+      if (listItemToRemove) {
+        listItemToRemove.remove();
+      }
+
+      // Optionally refresh the file list to ensure consistency
+      await fetchUploadedFiles();
+    } else {
+      throw new Error(result.error || 'File deletion failed');
+    }
   } catch (error) {
-      console.error('Error deleting file:', error.message);
+    console.error('Error deleting file:', error.message);
+    alert(`Deletion failed: ${error.message}`);
   }
 }
 

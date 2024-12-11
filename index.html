@@ -6,45 +6,66 @@
   <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
   <style>
     body {
-      background-color: #f4f7fa;
-      font-family: Arial, sans-serif;
+      background-color: #f8f9fa;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
+
+    .container {
+        background-color: white;
+        border-radius: 15px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        padding: 30px;
+        margin-top: 50px;
+    }
+
     #dropArea {
-      width: 100%;
-      height: 300px;
-      border: 2px dashed #007bff;
-      border-radius: 10px;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      text-align: center;
-      font-size: 18px;
-      color: #007bff;
-      margin-bottom: 20px;
-      background-color: #ffffff;
-      transition: background-color 0.3s ease;
+        background-color: #f1f3f5;
+        border: 2px dashed #4a90e2;
+        transition: all 0.3s ease;
     }
-    #dropArea.hover {
-      background-color: #e9ecef;
+
+    #dropArea:hover {
+        background-color: #e9ecef;
+        border-color: #007bff;
     }
-    #fileInput {
-      display: none;
+
+    .progress {
+        height: 25px;
+        border-radius: 13px;
+        overflow: hidden;
     }
+
     .progress-bar {
-      height: 20px;
+        background: linear-gradient(45deg, #4a90e2, #50c878);
+        animation: progress-animation 2s linear infinite;
     }
-    #fileList, #uploadedFilesSection, #logoutButton {
-      margin-top: 20px;
+
+    @keyframes progress-animation {
+        0% { background-position: 0 0; }
+        100% { background-position: 100% 0; }
     }
+
     .list-group-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+        transition: all 0.3s ease;
     }
-    .btn-danger {
-      margin-left: 10px;
+
+    .list-group-item:hover {
+        background-color: #f8f9fa;
+        transform: translateX(10px);
     }
-  </style>
+
+    #logoutButton {
+        margin-top: 20px;
+        background-color: #dc3545;
+        border-color: #dc3545;
+        transition: all 0.3s ease;
+    }
+
+    #logoutButton:hover {
+        background-color: #c82333;
+        transform: scale(1.05);
+    }
+  </style>  
 </head>
 <body>
   <div class="container mt-5">

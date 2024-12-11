@@ -1,80 +1,154 @@
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+
 const MAX_UPLOAD_SPEED_BPS = 100 * 1024 * 1024; // 100 MB/s
+const API_BASE_URL = 'https://app.staging.scientist.com/api/v2';
 
 async function uploadFile(localPath, event, abortController, accessToken) {
-    console.log(`Starting upload for: ${localPath}`);
+    console.log(`Starting multipart upload for: ${localPath}`);
 
     try {
         const fileSize = fs.statSync(localPath).size;
-        const partSize = 5 * 1024 * 1024; // 5 MB part size
-        const numParts = Math.ceil(fileSize / partSize);
-        const fileContent = fs.readFileSync(localPath);
+        console.log(`Total file size: ${fileSize} bytes`);
 
-        for (let partNumber = 0; partNumber < numParts; partNumber++) {
-            const start = partNumber * partSize;
-            const end = Math.min(start + partSize, fileSize);
-            const partContent = fileContent.slice(start, end);
+        // First, get the concurrency limit
+        const concurrencyResponse = await axios.get(`${API_BASE_URL}/storage/concurrency_limit`, {
+            params: { size_hint: fileSize },
+            headers: { Authorization: `Bearer ${accessToken}` }
+        });
 
-            console.log(`Requesting presigned URL for part ${partNumber + 1}/${numParts}...`);
-            try {
-                const response = await axios.get('https://app.staging.scientist.com/api/v2/storage/presigned_url', {
-                    params: { s3_key: `${path.basename(localPath)}.part${partNumber + 1}` },
-                    headers: { Authorization: `Bearer ${accessToken}` }
-                });
-                console.log('Presigned URL response:', response.data);
-                const presignedUrl = response.data.url;
-                console.log(`Received presigned URL for part ${partNumber + 1}: ${presignedUrl}`);
+        const { concurrency_limit: concurrencyLimit, chunk_size: chunkSize } = concurrencyResponse.data;
+        console.log(`Concurrency limit: ${concurrencyLimit}, Chunk size: ${chunkSize}`);
 
-                console.log(`Uploading part ${partNumber + 1}/${numParts}...`);
-                
-		const startTime = Date.now();
+        // Initiate multipart upload
+        const initiateResponse = await axios.post(`${API_BASE_URL}/storage/initiate_multipart_upload`,
+            { s3_key: path.basename(localPath) },
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
 
-		await axios.put(presignedUrl, partContent, {
-                    headers: { 'Content-Type': 'application/octet-stream' },
-                    onUploadProgress: (progressEvent) => {
-                        const progress = Math.round((progressEvent.loaded / progressEvent.total) * 100);
-                        event.reply('upload-progress', { progress });
-                        console.log(`Part ${partNumber + 1} progress: ${progress}%`);
-                    },
-                    signal: abortController.signal,
-                });
+        const { upload_id: uploadId } = initiateResponse.data;
+        console.log(`Multipart upload initiated with ID: ${uploadId}`);
 
-                const elapsedTime = Date.now() - startTime; // Time in ms
-		const uploadSpeedBps = partContent.length / (elapsedTime / 1000); // Bytes per second
+        // Prepare file reading
+        const fileHandle = fs.openSync(localPath, 'r');
+        const parts = [];
+        let totalBytesUploaded = 0;
 
-		console.log(`Part ${partNumber + 1} uploaded in ${elapsedTime} ms with speed ${uploadSpeedBps / (1024 * 1024)} MB/s`);
+        // Upload parts with full file coverage
+        const uploadParts = async () => {
+            const totalParts = Math.ceil(fileSize / chunkSize);
+            console.log(`Total parts to upload: ${totalParts}`);
 
-                // Calculate expected time for the current part based on the speed limit
-                const expectedTime = (partContent.length / MAX_UPLOAD_SPEED_BPS) * 1000; // Expected time in ms
+            for (let partBatch = 0; partBatch < Math.ceil(totalParts / concurrencyLimit); partBatch++) {
+                const batchPromises = [];
 
-                // Throttle the upload if it was too fast
-                if (elapsedTime < expectedTime) {
-                    const delay = expectedTime - elapsedTime;
-                    console.log(`Throttling for ${delay} ms to maintain upload speed limit...`);
-                    await new Promise(resolve => setTimeout(resolve, delay)); // Introduce delay
+                // Upload a batch of parts concurrently
+                for (let i = 0; i < concurrencyLimit; i++) {
+                    const partNumber = partBatch * concurrencyLimit + i + 1;
+
+                    // Stop if we've uploaded all parts
+                    if (partNumber > totalParts) break;
+
+                    const promise = (async () => {
+                        const start = (partNumber - 1) * chunkSize;
+                        const buffer = Buffer.alloc(chunkSize);
+                        const bytesRead = fs.readSync(fileHandle, buffer, 0, chunkSize, start);
+
+                        if (bytesRead === 0) return null; // No more data to read
+
+                        // Get presigned URL for this part
+                        const presignedUrlResponse = await axios.get(`${API_BASE_URL}/storage/presigned_url_for_part`, {
+                            params: {
+                                s3_key: path.basename(localPath),
+                                part_number: partNumber,
+                                upload_id: uploadId
+                            },
+                            headers: { Authorization: `Bearer ${accessToken}` }
+                        });
+
+                        const { url: presignedUrl } = presignedUrlResponse.data;
+
+                        // Upload the part
+                        const uploadStart = Date.now();
+                        const uploadResponse = await axios.put(presignedUrl, buffer.slice(0, bytesRead), {
+                            headers: { 'Content-Type': 'application/octet-stream' },
+                            signal: abortController.signal,
+                            onUploadProgress: (progressEvent) => {
+				const progress = Math.round((totalBytesUploaded / fileSize) * 100);
+                                const currentTime = Date.now();
+				const elapsedTime = (currentTime - uploadStart) / 1000;
+				const uploadSpeed = progressEvent.loaded / elapsedTime;
+
+				event.reply('upload-progress', {
+                                    progress,
+				    speed: uploadSpeed
+                                });
+                            }
+                        });
+
+                        const elapsedTime = Date.now() - uploadStart;
+                        const uploadSpeed = bytesRead / (elapsedTime / 1000);
+                        console.log(`Part ${partNumber}/${totalParts} uploaded in ${elapsedTime} ms, ${uploadSpeed / (1024 * 1024)} MB/s`);
+
+                        // Throttle if needed
+                        const expectedTime = (bytesRead / MAX_UPLOAD_SPEED_BPS) * 1000;
+                        if (elapsedTime < expectedTime) {
+                            await new Promise(resolve => setTimeout(resolve, expectedTime - elapsedTime));
+                        }
+
+                        return {
+                            part_number: partNumber,
+                            etag: uploadResponse.headers.etag
+                        };
+                    })();
+
+                    batchPromises.push(promise);
                 }
-		
-                console.log(`Part ${partNumber + 1} uploaded successfully.`);
-            } catch (error) {
-                console.error('Error requesting presigned URL or uploading part:', error.response ? error.response.data : error.message);
-                throw error;
-            }
-        }
 
-        // Create a storage object after successful upload
-        console.log(`Creating storage object for ${path.basename(localPath)}...`);
-        await axios.post('https://app.staging.scientist.com/api/v2/storage', {
-            storage_object: { name: path.basename(localPath), s3_key: path.basename(localPath) }
+                // Wait for this batch to complete and collect parts
+                const batchParts = await Promise.all(batchPromises);
+                parts.push(...batchParts.filter(part => part !== null));
+            }
+
+            return parts;
+        };
+
+        // Upload all parts
+        const uploadedParts = await uploadParts();
+
+        // Close file handle
+        fs.closeSync(fileHandle);
+
+        // Sort parts to ensure correct order
+        const sortedParts = uploadedParts.sort((a, b) => a.part_number - b.part_number);
+
+        // Complete multipart upload
+        await axios.post(`${API_BASE_URL}/storage/complete_multipart_upload`,
+            {
+                s3_key: path.basename(localPath),
+                upload_id: uploadId,
+                parts: sortedParts
+            },
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+
+        // Create storage object
+        await axios.post(`${API_BASE_URL}/storage`, {
+            storage_object: {
+                name: path.basename(localPath),
+                s3_key: path.basename(localPath)
+            }
         }, {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
-        console.log(`Storage object for ${path.basename(localPath)} created successfully.`);
 
-        event.reply('upload-success', path.basename(localPath));
+        event.reply('upload-success', {
+	     name: path.basename(localPath),
+	     path: localPath
+	});
     } catch (error) {
-        console.error('Error uploading file:', error.message);
+        console.error('Error during multipart upload:', error.response ? error.response.data : error.message);
         event.reply('upload-error', error.message);
     }
 }

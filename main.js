@@ -222,7 +222,7 @@ ipcMain.handle('delete-file', async (event, fileId) => {
   const tokens = loadTokens();
   if (!tokens || !isAccessTokenValid(tokens)) throw new Error('Invalid or expired token');
     
-  await deleteFile(fileId, tokens.accessToken);
+  return await deleteFile(fileId, tokens.accessToken);
 });
 
 ipcMain.on('logout', (event) => {
