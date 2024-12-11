@@ -236,11 +236,6 @@ ipcMain.on('logout', (event) => {
 
   const win = BrowserWindow.getFocusedWindow();
    
-  //if (win) {
-   // win.close();
-   // createWindow();
- // }
-
   if (win) {
     // Clear any session or cookies stored in the current window
     win.webContents.session.clearStorageData().then(() => {

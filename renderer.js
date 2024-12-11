@@ -99,8 +99,8 @@ window.api.onUploadProgress((event, { progress, speed }) => {
 
   uploadProgress.style.width = `${progress}%`;
   uploadProgress.setAttribute('aria-valuenow', progress);
-  const speedMBPerSecond = speed / (1024 * 1024); // Convert bytes per second to MB per second
-  uploadSpeedDisplay.textContent = `Upload Speed: ${speedMBPerSecond.toFixed(2)} MB/s`; // Display speed in MB/s
+  const speedMBPerSecond = speed / (1024 * 1024).toFixed(2); // Convert bytes per second to MB per second
+  uploadSpeedDisplay.textContent = `Upload Speed: ${speedMBPerSecond} MB/s`; // Display speed in MB/s
 
   if (progress === 100) {
     currentUploadIndex++;
@@ -112,7 +112,14 @@ window.api.onUploadSuccess((event, fileInfo) => {
     alert(`File "${fileInfo.name}" uploaded successfully!`);
     fetchUploadedFiles(); // Refresh uploaded files list
     currentUploadIndex++;
-    startNextUpload();
+
+    if (currentUploadIndex < filesToUpload.length) {
+        startNextUpload();
+    } else {
+        resetProgress();
+        filesToUpload = []; 
+        fileListItems.innerHTML = ''; 
+    }
 });
 
 window.api.onUploadError((event, errorMessage) => {
@@ -164,7 +171,6 @@ async function handleDeleteFile(fileId) {
         listItemToRemove.remove();
       }
 
-      // Optionally refresh the file list to ensure consistency
       await fetchUploadedFiles();
     } else {
       throw new Error(result.error || 'File deletion failed');
@@ -180,6 +186,6 @@ fetchUploadedFiles();
 
 logoutButton.addEventListener('click', () => {
   console.log('Logout event received');
-  window.api.logout(); // Send a message to the main process to handle logout
+  window.api.logout();
 });
 
