@@ -24,9 +24,10 @@
         transition: all 0.3s ease;
     }
 
-    #dropArea:hover {
-        background-color: #e9ecef;
-        border-color: #007bff;
+    #dropArea.drag-over {
+  	background-color: #e0e0e0;
+  	border-color: #007bff;
+  	transition: all 0.3s ease;
     }
 
     .progress {
@@ -70,7 +71,9 @@
 <body>
   <div class="container mt-5">
     <h1 class="my-4 text-center text-primary">Omic File Transfer</h1>
-    <div id="dropArea" class="text-center">
+    <div id="dropArea" class="text-center" 
+    	ondragover="this.classList.add('drag-over')" 
+    	ondragleave="this.classList.remove('drag-over')">
       Drag and drop files here or click to select files
     </div>
     <input type="file" id="fileInput" multiple>

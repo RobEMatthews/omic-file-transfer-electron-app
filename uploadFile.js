@@ -71,16 +71,18 @@ async function uploadFile(localPath, event, abortController, accessToken) {
 
 				onUploadProgress: (progressEvent) => {
      				    const loadedBytes = progressEvent.loaded || 0;
-      				    totalBytesUploaded += loadedBytes;
-
-        			    const progress = Math.round((totalBytesUploaded / fileSize) * 100);
-        			    const currentTime = Date.now();
-        			    const elapsedSeconds = Math.max((currentTime - uploadStart) / 1000, 0.001);
+      				    const chunkSize = progressEvent.loaded - (progressEvent.lastLoaded || 0);
+				    const uploadStart = Date.now();
+				    const elapsedSeconds = Math.max((uploadStart - progressEvent.timeStamp) / 1000, 0.001);
 
         			    const uploadSpeedBytes = totalBytesUploaded / elapsedSeconds;
        				    const uploadSpeedMBps = uploadSpeedBytes / (1024 * 1024);
 
-        			    event.reply('upload-progress', { progress, speed: uploadSpeedMBps });
+        			    event.reply('upload-progress', { 
+				    	progress: Math.round((totalBytesUploaded / fileSize) * 100), 
+					speed: uploadSpeedMBps 
+				    });
+				    progressEvent.lastLoaded = progressEvent.loaded;
    			       }
                             }
                         );

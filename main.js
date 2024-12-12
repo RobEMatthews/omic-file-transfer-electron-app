@@ -118,22 +118,35 @@ function isAccessTokenValid(tokens) {
 }
 
 function refreshAccessToken(refreshToken, win) {
-  console.log('Attempting to refresh access token.'); // Debugging log
-  axios.post(process.env.TOKEN_URL, {
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-    client_id: process.env.CLIENT_ID,
-    client_secret: process.env.CLIENT_SECRET
+  console.log('Attempting to refresh access token.');
+
+  const requestData = new URLSearchParams();
+  requestData.append('grant_type', 'refresh_token');
+  requestData.append('refresh_token', refreshToken);
+  requestData.append('client_id', process.env.CLIENT_ID);
+  requestData.append('client_secret', process.env.CLIENT_SECRET);
+
+  axios.post(process.env.TOKEN_URL, requestData, {
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
   })
   .then(response => {
-    console.log('New Access Token:', response.data.access_token);
-    storeTokens(response.data.access_token, response.data.refresh_token, response.data.expires_in);
-    if (win) {
-      win.loadFile('index.html');
+    const { access_token, refresh_token, expires_in } = response.data;
+
+    // Store new tokens
+    storeTokens(access_token, refresh_token || refreshToken, expires_in);
+
+    // Reload main page or refresh current window
+    if (win && !win.isDestroyed()) {
+      win.reload();
+    } else {
+      createWindow();
     }
   })
   .catch(error => {
-    console.error('Failed to refresh token:', error);
+    console.error('Token refresh failed:', error);
+    // Force re-authentication if refresh fails
     createWindow();
   });
 }

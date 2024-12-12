@@ -125,6 +125,18 @@ window.api.onUploadSuccess((event, fileInfo) => {
 window.api.onUploadError((event, errorMessage) => {
   console.error(`Upload error: ${errorMessage}`);
   alert(`Upload error: ${errorMessage}`);
+  
+  // Remove the failed file from the upload list
+  if (currentUploadIndex < filesToUpload.length) {
+    const failedFile = filesToUpload[currentUploadIndex];
+    const listItem = Array.from(fileListItems.children).find(
+      item => item.textContent.includes(failedFile.name)
+    );
+    if (listItem) listItem.remove();
+    
+    filesToUpload.splice(currentUploadIndex, 1);
+  }
+  
   currentUploadIndex++;
   startNextUpload();
 });
