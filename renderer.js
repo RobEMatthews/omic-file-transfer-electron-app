@@ -4,161 +4,208 @@ const uploadButton = document.getElementById('uploadButton');
 const uploadProgress = document.getElementById('uploadProgress');
 const uploadSpeedDisplay = document.getElementById('uploadSpeed');
 const fileListItems = document.getElementById('fileListItems');
+const uploadedFilesList = document.getElementById('uploadedFilesList');
 const logoutButton = document.getElementById('logoutButton');
 
 let filesToUpload = [];
 let currentUploadIndex = 0;
 let isUploading = false;
-let activeUploadPath = null;
 
-function createFileListItem(file, removeCallback) {
-  const listItem = document.createElement('li');
-  listItem.className = 'list-group-item d-flex justify-content-between align-items-center';
-  listItem.textContent = file.name;
+function createNotification(message, type = 'success') {
+  const notificationContainer = document.createElement('div');
+  notificationContainer.className = `alert alert-${type} notification`;
+  notificationContainer.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+    transition: opacity 0.5s ease;
+  `;
+  notificationContainer.textContent = message;
+  document.body.appendChild(notificationContainer);
+
+  setTimeout(() => {
+    notificationContainer.style.opacity = '0';
+    setTimeout(() => {
+      document.body.removeChild(notificationContainer);
+    }, 500);
+  }, 3000);
+}
+
+function createFileListItem(file, removeCallback, isUploading = false) {
+  const fileItem = document.createElement('div');
+  fileItem.className = `file-item ${isUploading ? 'uploading' : ''}`;
+
+  const fileInfo = document.createElement('div');
+  fileInfo.innerHTML = `
+    <strong>${file.name}</strong>
+    <small class="text-muted ml-2">${(file.size / 1024 / 1024).toFixed(2)} MB</small>
+    ${isUploading ? '<span class="badge badge-primary ml-2">Uploading</span>' : ''}
+  `;
 
   const removeButton = document.createElement('button');
-  removeButton.className = 'btn btn-danger btn-sm';
-  removeButton.textContent = 'Remove';
+  removeButton.className = 'btn btn-sm btn-outline-danger';
+  removeButton.innerHTML = '<i class="fas fa-trash"></i>';
   removeButton.addEventListener('click', removeCallback);
 
-  listItem.appendChild(removeButton);
-  return listItem;
+  fileItem.appendChild(fileInfo);
+  fileItem.appendChild(removeButton);
+  fileItem.dataset.path = file.path;
+
+  return fileItem;
 }
 
 function handleFiles(files) {
-  Array.from(files).forEach(file => {
-    if (!filesToUpload.some(f => f.path === file.path)) {
-      const removeCallback = () => {
-        if (activeUploadPath === file.path) {
-          window.api.cancelUpload(file.path);
-          resetProgress();
-        }
-        filesToUpload = filesToUpload.filter(f => f.path !== file.path);
-        const listItem = document.querySelector(`li[data-path="${file.path}"]`);
-        if (listItem) listItem.remove();
-
-	if (filesToUpload.length === 0 && fileInput) {
-    	  fileInput.value = '';
-	}
-      };
-
-      const listItem = createFileListItem(file, removeCallback);
-      listItem.dataset.path = file.path;
-      fileListItems.appendChild(listItem);
-      filesToUpload.push(file);
+    console.log('Handling files:', files);
+    if (isUploading) {
+        createNotification('Upload in progress. Cannot add more files.', 'warning');
+        return;
     }
-  });
+
+    const MAX_FILES = 10;
+    if (filesToUpload.length + files.length > MAX_FILES) {
+        createNotification(`Maximum ${MAX_FILES} files allowed`, 'warning');
+        return;
+    }
+
+    files.forEach(file => {
+        if (!filesToUpload.some(f => f.path === file.path)) {
+            const removeCallback = () => {
+                filesToUpload = filesToUpload.filter(f => f.path !== file.path);
+                document.querySelector(`.file-item[data-path="${file.path}"]`).remove();
+                updateUploadButtonState();
+            };
+
+            const listItem = createFileListItem(file, removeCallback);
+            fileListItems.appendChild(listItem);
+            filesToUpload.push(file);
+        }
+    });
+
+    updateUploadButtonState();
+    fileInput.value = '';
 }
 
-function updateUploadProgress(progress, speed) {
-  uploadProgress.style.width = `${progress}%`;
-  uploadProgress.setAttribute('aria-valuenow', progress);
-  uploadSpeedDisplay.textContent = `Upload Speed: ${speed.toFixed(2)} MB/s`;
+function updateUploadButtonState() {
+  uploadButton.disabled = filesToUpload.length === 0 || isUploading;
+  dropArea.classList.toggle('disabled', isUploading);
 }
 
-function resetProgress() {
-  uploadProgress.style.width = '0%';
-  uploadProgress.setAttribute('aria-valuenow', 0);
-  uploadSpeedDisplay.textContent = 'Upload Speed: 0 MB/s';
-  isUploading = false;
-  activeUploadPath = null;
+function setupEventListeners() {
+    dropArea.addEventListener('click', () => {
+        if (!isUploading) fileInput.click();
+    });
+
+    dropArea.addEventListener('dragover', event => {
+        event.preventDefault();
+        dropArea.classList.toggle('drag-over', !isUploading);
+    });
+
+    dropArea.addEventListener('dragleave', () => {
+        dropArea.classList.remove('drag-over');
+    });
+
+    dropArea.addEventListener('drop', event => {
+        event.preventDefault();
+        dropArea.classList.remove('drag-over');
+        
+        const files = Array.from(event.dataTransfer.files).filter(file => {
+	    console.log('File type:', file.type);
+	    const allowedTypes = [
+  		'text/csv',
+  		'application/zip',
+  		'text/plain',
+  		'application/fastq',
+ 	 	'application/fasta'
+	    ];
+	    return allowedTypes.includes(file.type);
+        });
+
+        if (!isUploading && files.length > 0) {
+            handleFiles(files);
+        } else if (files.length === 0) {
+            createNotification('Unsupported file type', 'warning');
+        }
+    });
+
+    fileInput.addEventListener('change', () => {
+        const files = Array.from(fileInput.files).filter(file => {
+            const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
+            if (file.size > MAX_FILE_SIZE) {
+                createNotification(`${file.name} exceeds 100 MB limit`, 'warning');
+                return false;
+            }
+            return true;
+        });
+        handleFiles(files);
+    });
+
+    uploadButton.addEventListener('click', startUpload);
+    logoutButton.addEventListener('click', () => window.api.logout());
+}
+
+function startUpload() {
+  console.log('Starting upload. Files to upload:', filesToUpload);
+  if (filesToUpload.length === 0 || isUploading) return;
+
+  isUploading = true;
+  updateUploadButtonState();
+  currentUploadIndex = 0;
+  startNextUpload();
 }
 
 function startNextUpload() {
-  console.log('Starting next upload');
-  console.log('Current upload index:', currentUploadIndex);
-  console.log('Total files to upload:', filesToUpload.length);
+  console.log(`Starting upload for file ${currentUploadIndex + 1}/${filesToUpload.length}`);
   if (currentUploadIndex < filesToUpload.length) {
-    console.log('Resetting progress');
     resetProgress();
-    activeUploadPath = filesToUpload[currentUploadIndex].path;
-    console.log('Uploading file:', activeUploadPath);
-    window.api.uploadFile(activeUploadPath);
+    const fileToUpload = filesToUpload[currentUploadIndex];
+
+    const fileItems = document.querySelectorAll('.file-item');
+    fileItems.forEach((item, index) => {
+      item.classList.toggle('uploading', index === currentUploadIndex);
+    });
+
+    window.api.uploadFile(fileToUpload.path);
   } else {
-    console.log('No more files to upload');
-    resetProgress();
+    completeUpload();
+  }
+}
+
+function resetProgress() {
+  console.log('Resetting upload progress');
+  uploadProgress.style.width = '0%';
+  uploadProgress.setAttribute('aria-valuenow', 0);
+  uploadSpeedDisplay.textContent = 'Upload Speed: 0 MB/s';
+}
+
+function completeUpload() {
+  console.log('Upload process completed');
+  isUploading = false;
+  filesToUpload = [];
+  fileListItems.innerHTML = '';
+  updateUploadButtonState();
+  fetchUploadedFiles();
+}
+
+function completeUpload() {
+    console.log('Upload process completed');
+    uploadProgress.style.width = '0%';
+    uploadProgress.setAttribute('aria-valuenow', 0);
+    uploadSpeedDisplay.textContent = 'Upload Speed: 0 MB/s';
+
     isUploading = false;
     filesToUpload = [];
     fileListItems.innerHTML = '';
-  }
-}
-
-function handleFileEvents() {
-  dropArea.addEventListener('click', () => fileInput.click());
-  dropArea.addEventListener('dragover', event => event.preventDefault());
-  dropArea.addEventListener('dragleave', () => dropArea.classList.remove('hover'));
-  dropArea.addEventListener('drop', event => {
-    event.preventDefault();
-    dropArea.classList.remove('hover');
-    handleFiles(event.dataTransfer.files);
-  });
-
-  fileInput.addEventListener('change', () => handleFiles(fileInput.files));
-}
-
-function uploadButtonHandler() {
-  uploadButton.addEventListener('click', () => {
-  
-  console.log('Upload button clicked');
-  console.log('Files to upload:', filesToUpload);
-  console.log('Is uploading:', isUploading);
-    if (!isUploading) {
-      isUploading = true;
-      currentUploadIndex = 0;
-      startNextUpload();
-    }
-  });
-}
-
-function fetchUploadedFiles() {
-  window.api.listFiles()
-    .then(files => {
-      const uploadedFilesList = document.getElementById('uploadedFilesList');
-      uploadedFilesList.innerHTML = '';
-      files.forEach(file => {
-        const listItem = createFileListItem(file, async () => {
-          await handleDeleteFile(file.id);
-          alert(`File "${file.name}" deleted successfully!`);
-          fetchUploadedFiles();
-        });
-        uploadedFilesList.appendChild(listItem);
-      });
-    })
-    .catch(error => console.error('Error fetching files:', error.message));
-}
-
-async function handleDeleteFile(fileId) {
-  try {
-    const result = await window.api.deleteFile(fileId);
-    if (result.success) {
-      const uploadedFilesList = document.getElementById('uploadedFilesList');
-      const listItemToRemove = Array.from(uploadedFilesList.children)
-        .find(item => item.dataset.fileId === fileId);
-
-      if (listItemToRemove) {
-        listItemToRemove.remove();
-      }
-
-      await fetchUploadedFiles();
-    } else {
-      throw new Error(result.error || 'File deletion failed');
-    }
-  } catch (error) {
-    console.error('Error deleting file:', error.message);
-    alert(`Deletion failed: ${error.message}`);
-  }
+    updateUploadButtonState();
+    fetchUploadedFiles();
 }
 
 function handleUploadProgress() {
   window.api.onUploadProgress((event, { progress, speed }) => {
-     console.log('Upload Progress Event:', {
-       progress, 
-       speed, 
-       currentUploadIndex,
-       activeUploadPath,
-       expectedFilePath: filesToUpload[currentUploadIndex]?.path
-     });
-    updateUploadProgress(progress, speed);
+    console.log(`Upload progress: ${progress}%, Speed: ${speed.toFixed(2)} MB/s`);
+    uploadProgress.style.width = `${progress}%`;
+    uploadProgress.setAttribute('aria-valuenow', progress);
+    uploadSpeedDisplay.textContent = `Upload Speed: ${speed.toFixed(2)} MB/s`;
 
     if (progress === 100) {
       currentUploadIndex++;
@@ -169,7 +216,8 @@ function handleUploadProgress() {
 
 function handleUploadSuccess() {
   window.api.onUploadSuccess((event, fileInfo) => {
-    alert(`File "${fileInfo.name}" uploaded successfully!`);
+    console.log('File uploaded successfully:', fileInfo.name);
+    createNotification(`${fileInfo.name} uploaded successfully`);
     fetchUploadedFiles();
     currentUploadIndex++;
     startNextUpload();
@@ -177,28 +225,65 @@ function handleUploadSuccess() {
 }
 
 function handleUploadError() {
-  window.api.onUploadError((event, errorMessage) => {
-    console.error(`Upload error: ${errorMessage}`);
-    alert(`Upload error: ${errorMessage}`);
-    currentUploadIndex++;
-    startNextUpload();
-  });
+    window.api.onUploadError((event, errorMessage) => {
+        console.error(`Upload error: ${errorMessage}`);
+        createNotification(`Upload error: ${errorMessage}`, 'danger');
+        
+        if (currentUploadIndex < filesToUpload.length) {
+            currentUploadIndex++;
+            startNextUpload();
+        } else {
+            completeUpload();
+        }
+    });
 }
 
-function logoutHandler() {
-  logoutButton.addEventListener('click', () => {
-    console.log('Logout event received');
-    window.api.logout();
-  });
+function fetchUploadedFiles() {
+  console.log('Fetching uploaded files');
+  window.api.listFiles()
+    .then(files => {
+      uploadedFilesList.innerHTML = '';
+      files.forEach(file => {
+        const listItem = document.createElement('li');
+        listItem.className = 'list-group-item d-flex justify-content-between align-items-center';
+        listItem.innerHTML = `
+          ${file.name}
+          <button class="btn btn-sm btn-outline-danger delete-file" data-id="${file.id}">
+            <i class="fas fa-trash"></i>
+          </button>
+        `;
+
+        listItem.querySelector('.delete-file').addEventListener('click', async () => {
+          await handleDeleteFile(file.id);
+        });
+
+        uploadedFilesList.appendChild(listItem);
+      });
+    })
+    .catch(error => {
+      console.error('Error fetching files:', error.message);
+      createNotification('Failed to fetch uploaded files', 'danger');
+    });
+}
+
+async function handleDeleteFile(fileId) {
+  try {
+    console.log('Deleting file with ID:', fileId);
+    await window.api.deleteFile(fileId);
+    createNotification('File deleted successfully');
+    fetchUploadedFiles();
+  } catch (error) {
+    console.error('Error deleting file:', error);
+    createNotification(`Deletion failed: ${error.message}`, 'danger');
+  }
 }
 
 function init() {
-  handleFileEvents();
-  uploadButtonHandler();
+  console.log('Initializing renderer');
+  setupEventListeners();
   handleUploadProgress();
   handleUploadSuccess();
   handleUploadError();
-  logoutHandler();
   fetchUploadedFiles();
 }
 

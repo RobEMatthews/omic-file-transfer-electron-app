@@ -126,7 +126,17 @@ async function uploadFile(localPath, event, abortController, accessToken) {
 
         event.reply('upload-success', { name: path.basename(localPath), path: localPath });
     } catch (error) {
-        event.reply('upload-error', error.message);
+        console.error('Detailed upload error:', {
+            message: error.message,
+            code: error.code,
+            stack: error.stack,
+            response: error.response?.data
+        });
+        
+        event.reply('upload-error', {
+            message: error.message,
+            fileName: path.basename(localPath)
+        });
     }
 }
 

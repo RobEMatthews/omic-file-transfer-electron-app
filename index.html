@@ -3,104 +3,135 @@
 <head>
   <meta charset="UTF-8">
   <title>File Transfer App</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
   <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
   <style>
     body {
-      background-color: #f8f9fa;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f4f6f9;
+      font-family: 'Inter', sans-serif;
     }
 
     .container {
-        background-color: white;
-        border-radius: 15px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        padding: 30px;
-        margin-top: 50px;
+      background-color: white;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+      padding: 40px;
+      margin-top: 50px;
     }
 
     #dropArea {
-        background-color: #f1f3f5;
-        border: 2px dashed #4a90e2;
-        transition: all 0.3s ease;
+      border: 3px dashed #a0aec0;
+      border-radius: 10px;
+      padding: 50px;
+      text-align: center;
+      transition: all 0.3s ease;
+      cursor: pointer;
     }
 
     #dropArea.drag-over {
-  	background-color: #e0e0e0;
-  	border-color: #007bff;
-  	transition: all 0.3s ease;
+      background-color: #e6f2ff;
+      border-color: #4299e1;
     }
 
-    .progress {
-        height: 25px;
-        border-radius: 13px;
-        overflow: hidden;
+    #dropArea.disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
 
-    .progress-bar {
-        background: linear-gradient(45deg, #4a90e2, #50c878);
-        animation: progress-animation 2s linear infinite;
+    .file-list {
+      max-height: 250px;
+      overflow-y: auto;
     }
 
-    @keyframes progress-animation {
-        0% { background-position: 0 0; }
-        100% { background-position: 100% 0; }
+    .file-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px;
+      background-color: #f7fafc;
+      border-radius: 6px;
+      margin-bottom: 10px;
+      transition: all 0.3s ease;
     }
 
-    .list-group-item {
-        transition: all 0.3s ease;
+    .file-item:hover {
+      background-color: #edf2f7;
+      transform: translateX(5px);
     }
 
-    .list-group-item:hover {
-        background-color: #f8f9fa;
-        transform: translateX(10px);
+    .upload-progress {
+      height: 30px;
+      border-radius: 15px;
+      margin-top: 20px;
     }
 
-    #logoutButton {
-        margin-top: 20px;
-        background-color: #dc3545;
-        border-color: #dc3545;
-        transition: all 0.3s ease;
+    .btn-upload {
+      background: linear-gradient(135deg, #4299e1, #3182ce);
+      color: white;
+      transition: all 0.3s ease;
+    }
+    
+    .file-item.uploading {
+      background-color: #e6f2ff;
+      border-left: 4px solid #4299e1;
     }
 
-    #logoutButton:hover {
-        background-color: #c82333;
-        transform: scale(1.05);
+    .notification {
+      opacity: 1;
+      transition: opacity 0.5s ease;
     }
-  </style>  
+
+    .btn-upload:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .btn-cancel {
+      background-color: #e53e3e;
+      color: white;
+    }
+  </style>
 </head>
 <body>
-  <div class="container mt-5">
-    <h1 class="my-4 text-center text-primary">Omic File Transfer</h1>
-    <div id="dropArea" class="text-center" 
-    	ondragover="this.classList.add('drag-over')" 
-    	ondragleave="this.classList.remove('drag-over')">
-      Drag and drop files here or click to select files
+  <div class="container">
+    <h1 class="text-center mb-4">
+      <i class="fas fa-cloud-upload-alt text-primary mr-2"></i>Omic File Transfer
+    </h1>
+
+    <div id="dropArea">
+      <i class="fas fa-file-upload text-primary" style="font-size: 3rem;"></i>
+      <p class="text-muted mt-3">Drag and drop files here or click to select</p>
     </div>
-    <input type="file" id="fileInput" multiple>
-    <button id="uploadButton" class="btn btn-primary btn-block">Upload</button>
-    <div class="mt-3">
-      <div class="progress">
-        <div id="uploadProgress" class="progress-bar bg-success" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-      </div>
-      <div id="uploadSpeed" class="text-center mt-2">Upload Speed: 0 MB/s</div>
-    </div>
+
+    <input type="file" id="fileInput" multiple style="display:none;">
+
     <div id="fileList" class="mt-3">
-      <h4>Files to Upload:</h4>
-      <ul id="fileListItems" class="list-group">
-        <!-- File names will be added here -->
-      </ul>
+      <h5>Files to Upload</h5>
+      <div id="fileListItems" class="file-list"></div>
     </div>
-    <div id="uploadedFilesSection" class="mt-3">
-      <h4> Uploaded Files :</h4>
-      <ul id="uploadedFilesList" class="list-group">
-        <!-- Uploaded file names will be added here -->
-      </ul>
+
+    <div class="upload-controls mt-3">
+      <button id="uploadButton" class="btn btn-upload btn-block" disabled>
+        <i class="fas fa-upload mr-2"></i>Upload
+      </button>
+
+      <div class="progress upload-progress mt-3">
+        <div id="uploadProgress" class="progress-bar" role="progressbar" style="width: 0%"></div>
+      </div>
+      <div id="uploadSpeed" class="text-center mt-2 text-muted">Upload Speed: 0 MB/s</div>
     </div>
-    <div class="d-flex justify-content-center">
-      <button id="logoutButton" class="btn btn-danger">Logout</button>
-   </div>
+
+    <div id="uploadedFilesSection" class="mt-4">
+      <h5>Uploaded Files</h5>
+      <ul id="uploadedFilesList" class="list-group"></ul>
+    </div>
+
+    <div class="text-center mt-4">
+      <button id="logoutButton" class="btn btn-outline-danger">
+        <i class="fas fa-sign-out-alt mr-2"></i>Logout
+      </button>
+    </div>
   </div>
   <script src="renderer.js"></script>
 </body>
 </html>
-

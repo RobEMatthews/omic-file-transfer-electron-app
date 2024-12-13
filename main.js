@@ -142,30 +142,41 @@ const startExpressServer = () => {
   });
 };
 
+let isLoginInProgress = false; 
+
 const handleUploadFile = (event, filePath) => {
     try {
         const tokens = loadTokens();
         if (!tokens || !isAccessTokenValid(tokens)) {
             if (tokens && tokens.refreshToken) {
                 console.log('Access token expired. Attempting to refresh...');
-                return refreshAccessToken(tokens.refreshToken, BrowserWindow.getFocusedWindow())
-                    .then(() => handleUploadFile(event, filePath))
-                    .catch(error => {
-                        console.error('Failed to refresh token:', error);
-                        event.reply('upload-error', 'Failed to refresh token. Please log in again.');
-                        handleLogout(event);
-                    });
+                if (!isLoginInProgress) { 
+                    isLoginInProgress = true;
+                    return refreshAccessToken(tokens.refreshToken, BrowserWindow.getFocusedWindow())
+                        .then(() => {
+                            isLoginInProgress = false; 
+                            handleUploadFile(event, filePath);
+                        })
+                        .catch(error => {
+                            console.error('Failed to refresh token:', error);
+                            event.reply('upload-error', 'Failed to refresh token. Please log in again.');
+                            handleLogout(event);
+                            isLoginInProgress = false; 
+                        });
+                } else {
+                    console.log('Login process already in progress. Skipping additional login attempts.');
+                    return;
+                }
             }
             throw new Error('Invalid or expired token');
         }
 
         const abortController = new AbortController();
         uploadControllers.set(filePath, abortController);
-        uploadFile(filePath, event, abortController, tokens.accessToken)
-            .catch(error => {
-                console.error('Upload failed:', error);
-                event.reply('upload-error', error.message || 'Upload failed');
-            });
+        uploadFile(filePath, event, abortController, tokens.accessToken).catch(error => {
+            console.error('Upload failed:', error);
+            event.reply('upload-error', error.message || 'Upload failed');
+        });
     } catch (error) {
         console.error('Upload preparation error:', error);
         event.reply('upload-error', error.message);
