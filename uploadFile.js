@@ -44,7 +44,7 @@ async function uploadPart(url, buffer, bytesRead, abortController, event, totalB
 
     event.reply('upload-progress', {
         progress,
-        speed: (uploadSpeed / (1024 * 1024)).toFixed(2)
+	speed: isNaN(uploadSpeed) ? 0 : Number((uploadSpeed / (1024 * 1024)).toFixed(2))
     });
 
     return uploadResponse.headers.etag;

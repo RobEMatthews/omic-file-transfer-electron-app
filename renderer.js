@@ -77,6 +77,7 @@ function startNextUpload() {
   } else {
     console.log('No more files to upload');
     resetProgress();
+    isUploading = false;
     filesToUpload = [];
     fileListItems.innerHTML = '';
   }
@@ -102,6 +103,7 @@ function uploadButtonHandler() {
   console.log('Files to upload:', filesToUpload);
   console.log('Is uploading:', isUploading);
     if (!isUploading) {
+      isUploading = true;
       currentUploadIndex = 0;
       startNextUpload();
     }
@@ -156,7 +158,6 @@ function handleUploadProgress() {
        activeUploadPath,
        expectedFilePath: filesToUpload[currentUploadIndex]?.path
      });
-     if (!isUploading || activeUploadPath !== filesToUpload[currentUploadIndex].path) return;
     updateUploadProgress(progress, speed);
 
     if (progress === 100) {

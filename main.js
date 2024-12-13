@@ -143,22 +143,33 @@ const startExpressServer = () => {
 };
 
 const handleUploadFile = (event, filePath) => {
-  try {
-    const tokens = loadTokens();
-    if (!tokens || !isAccessTokenValid(tokens)) {
-      throw new Error('Invalid or expired token');
+    try {
+        const tokens = loadTokens();
+        if (!tokens || !isAccessTokenValid(tokens)) {
+            if (tokens && tokens.refreshToken) {
+                console.log('Access token expired. Attempting to refresh...');
+                return refreshAccessToken(tokens.refreshToken, BrowserWindow.getFocusedWindow())
+                    .then(() => handleUploadFile(event, filePath))
+                    .catch(error => {
+                        console.error('Failed to refresh token:', error);
+                        event.reply('upload-error', 'Failed to refresh token. Please log in again.');
+                        handleLogout(event);
+                    });
+            }
+            throw new Error('Invalid or expired token');
+        }
+
+        const abortController = new AbortController();
+        uploadControllers.set(filePath, abortController);
+        uploadFile(filePath, event, abortController, tokens.accessToken)
+            .catch(error => {
+                console.error('Upload failed:', error);
+                event.reply('upload-error', error.message || 'Upload failed');
+            });
+    } catch (error) {
+        console.error('Upload preparation error:', error);
+        event.reply('upload-error', error.message);
     }
-    const abortController = new AbortController();
-    uploadControllers.set(filePath, abortController);
-    uploadFile(filePath, event, abortController, tokens.accessToken)
-      .catch(error => {
-        console.error('Upload failed:', error);
-        event.reply('upload-error', error.message || 'Upload failed');
-      });
-  } catch (error) {
-    console.error('Upload preparation error:', error);
-    event.reply('upload-error', error.message);
-  }
 };
 
 const handleCancelUpload = (event, filePath) => {
