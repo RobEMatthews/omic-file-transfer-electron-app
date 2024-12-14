@@ -71,8 +71,16 @@ function handleFiles(files) {
     files.forEach(file => {
         if (!filesToUpload.some(f => f.path === file.path)) {
             const removeCallback = () => {
-                filesToUpload = filesToUpload.filter(f => f.path !== file.path);
-                document.querySelector(`.file-item[data-path="${file.path}"]`).remove();
+                if (isUploading && filesToUpload[currentUploadIndex]?.path === file.path) {
+                    window.api.cancelUpload(file.path);
+                } else {
+                    filesToUpload = filesToUpload.filter(f => f.path !== file.path);
+
+                    const fileItemToRemove = document.querySelector(`.file-item[data-path="${file.path}"]`);
+                    if (fileItemToRemove) {
+                        fileItemToRemove.remove();
+                    }
+                }
                 updateUploadButtonState();
             };
 
@@ -228,9 +236,46 @@ function handleUploadError() {
     window.api.onUploadError((event, errorMessage) => {
         console.error(`Upload error: ${errorMessage}`);
         createNotification(`Upload error: ${errorMessage}`, 'danger');
-        
+
+        filesToUpload.splice(currentUploadIndex, 1);
+
+        const fileItems = document.querySelectorAll('.file-item');
+        if (fileItems[currentUploadIndex]) {
+            fileItems[currentUploadIndex].remove();
+        }
+
         if (currentUploadIndex < filesToUpload.length) {
-            currentUploadIndex++;
+            startNextUpload();
+        } else {
+            completeUpload();
+        }
+    });
+}
+
+function handleUploadError() {
+    window.api.onUploadError((event, errorInfo) => {
+        console.error('Upload error:', errorInfo);
+
+        const errorMessage = errorInfo.message || 'Unknown error';
+        const fileName = errorInfo.fileName || 'Unknown file';
+
+        console.error(`Upload error for ${fileName}: ${errorMessage}`);
+        createNotification(`Upload failed: ${fileName} - ${errorMessage}`, 'danger');
+
+        const failedFileIndex = filesToUpload.findIndex(file =>
+            path.basename(file.path) === fileName
+        );
+
+        if (failedFileIndex !== -1) {
+            filesToUpload.splice(failedFileIndex, 1);
+
+            const fileItems = document.querySelectorAll('.file-item');
+            if (fileItems[failedFileIndex]) {
+                fileItems[failedFileIndex].remove();
+            }
+        }
+
+        if (filesToUpload.length > 0) {
             startNextUpload();
         } else {
             completeUpload();
