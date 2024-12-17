@@ -171,11 +171,20 @@ const handleUploadFile = (event, filePath) => {
             throw new Error('Invalid or expired token');
         }
 
+	const existingController = uploadControllers.get(filePath);
+        if (existingController) {
+            existingController.abort();
+            uploadControllers.delete(filePath);
+        }
+
         const abortController = new AbortController();
         uploadControllers.set(filePath, abortController);
-        uploadFile(filePath, event, abortController, tokens.accessToken).catch(error => {
+        
+	uploadFile(filePath, event, abortController, tokens.accessToken).catch(error => {
             console.error('Upload failed:', error);
             event.reply('upload-error', error.message || 'Upload failed');
+        }).finally(() => {
+            uploadControllers.delete(filePath);
         });
     } catch (error) {
         console.error('Upload preparation error:', error);
@@ -184,12 +193,12 @@ const handleUploadFile = (event, filePath) => {
 };
 
 const handleCancelUpload = (event, filePath) => {
-  const abortController = uploadControllers.get(filePath);
-  if (abortController) {
-    abortController.abort();
-    uploadControllers.delete(filePath);
-  }
-};
+    const abortController = uploadControllers.get(filePath);
+    if (abortController) {
+        abortController.abort();
+        uploadControllers.delete(filePath);
+    }
+}
 
 const handleListFiles = async () => {
   const tokens = loadTokens();
@@ -204,6 +213,17 @@ const handleDeleteFile = async (event, fileId) => {
 };
 
 const handleLogout = (event) => {
+  console.log('Logging out and cancelling all uploads');
+
+  uploadControllers.forEach((controller, filePath) => {
+    try {
+      controller.abort();
+    } catch (error) {
+      console.error('Error aborting upload:', error);
+    }
+  });
+  uploadControllers.clear();
+
   const tokenPath = path.join(__dirname, 'tokens.json');
   if (fs.existsSync(tokenPath)) {
     fs.unlinkSync(tokenPath);
@@ -211,16 +231,20 @@ const handleLogout = (event) => {
   }
 
   const win = BrowserWindow.getFocusedWindow();
-  if (win) {
+  if (win && !win.isDestroyed()) {
     win.webContents.session.clearStorageData().then(() => {
       console.log('Session storage cleared.');
       win.close();
       createWindow();
     }).catch(error => {
       console.error('Error clearing session data:', error);
-      win.close();
-      createWindow();
+      if (!win.isDestroyed()) {
+	win.close();
+        createWindow();
+      }
     });
+  } else {
+    createWindow();
   }
 };
 

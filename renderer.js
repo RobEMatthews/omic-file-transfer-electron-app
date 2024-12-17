@@ -1,3 +1,4 @@
+
 const dropArea = document.getElementById('dropArea');
 const fileInput = document.getElementById('fileInput');
 const uploadButton = document.getElementById('uploadButton');
@@ -11,6 +12,7 @@ let filesToUpload = [];
 let currentUploadIndex = 0;
 let isUploading = false;
 
+// Create a notification popup with a specified type and message
 function createNotification(message, type = 'success') {
   const notificationContainer = document.createElement('div');
   notificationContainer.className = `alert alert-${type} notification`;
@@ -32,6 +34,7 @@ function createNotification(message, type = 'success') {
   }, 3000);
 }
 
+// Create a file list item with remove functionality
 function createFileListItem(file, removeCallback, isUploading = false) {
   const fileItem = document.createElement('div');
   fileItem.className = `file-item ${isUploading ? 'uploading' : ''}`;
@@ -55,6 +58,7 @@ function createFileListItem(file, removeCallback, isUploading = false) {
   return fileItem;
 }
 
+// Handle adding files to the upload queue
 function handleFiles(files) {
     console.log('Handling files:', files);
     if (isUploading) {
@@ -73,14 +77,23 @@ function handleFiles(files) {
             const removeCallback = () => {
                 if (isUploading && filesToUpload[currentUploadIndex]?.path === file.path) {
                     window.api.cancelUpload(file.path);
+
+                    filesToUpload.splice(currentUploadIndex, 1);
+
+                    if (filesToUpload.length > 0) {
+                        startNextUpload();
+                    } else {
+                        completeUpload();
+                    }
                 } else {
                     filesToUpload = filesToUpload.filter(f => f.path !== file.path);
-
-                    const fileItemToRemove = document.querySelector(`.file-item[data-path="${file.path}"]`);
-                    if (fileItemToRemove) {
-                        fileItemToRemove.remove();
-                    }
                 }
+
+                const fileItemToRemove = document.querySelector(`.file-item[data-path="${file.path}"]`);
+                if (fileItemToRemove) {
+                    fileItemToRemove.remove();
+                }
+
                 updateUploadButtonState();
             };
 
@@ -94,11 +107,13 @@ function handleFiles(files) {
     fileInput.value = '';
 }
 
+// Update the state of the upload button based on current upload status
 function updateUploadButtonState() {
   uploadButton.disabled = filesToUpload.length === 0 || isUploading;
   dropArea.classList.toggle('disabled', isUploading);
 }
 
+// Set up event listeners for drag and drop, file selection, and buttons
 function setupEventListeners() {
     dropArea.addEventListener('click', () => {
         if (!isUploading) fileInput.click();
@@ -152,6 +167,7 @@ function setupEventListeners() {
     logoutButton.addEventListener('click', () => window.api.logout());
 }
 
+// Start the upload process for files in the queue
 function startUpload() {
   console.log('Starting upload. Files to upload:', filesToUpload);
   if (filesToUpload.length === 0 || isUploading) return;
@@ -162,6 +178,7 @@ function startUpload() {
   startNextUpload();
 }
 
+// Start uploading the next file in the queue
 function startNextUpload() {
   console.log(`Starting upload for file ${currentUploadIndex + 1}/${filesToUpload.length}`);
   if (currentUploadIndex < filesToUpload.length) {
@@ -170,7 +187,11 @@ function startNextUpload() {
 
     const fileItems = document.querySelectorAll('.file-item');
     fileItems.forEach((item, index) => {
-      item.classList.toggle('uploading', index === currentUploadIndex);
+      item.classList.remove('uploading');
+      
+      if (index === currentUploadIndex) {
+	item.classList.add('uploading');
+      }
     });
 
     window.api.uploadFile(fileToUpload.path);
@@ -179,6 +200,7 @@ function startNextUpload() {
   }
 }
 
+// Reset the upload progress display
 function resetProgress() {
   console.log('Resetting upload progress');
   uploadProgress.style.width = '0%';
@@ -186,15 +208,7 @@ function resetProgress() {
   uploadSpeedDisplay.textContent = 'Upload Speed: 0 MB/s';
 }
 
-function completeUpload() {
-  console.log('Upload process completed');
-  isUploading = false;
-  filesToUpload = [];
-  fileListItems.innerHTML = '';
-  updateUploadButtonState();
-  fetchUploadedFiles();
-}
-
+// Complete upload process and handle potential logout
 function completeUpload() {
     console.log('Upload process completed');
     uploadProgress.style.width = '0%';
@@ -208,6 +222,7 @@ function completeUpload() {
     fetchUploadedFiles();
 }
 
+// Handle upload progress updates
 function handleUploadProgress() {
   window.api.onUploadProgress((event, { progress, speed }) => {
     console.log(`Upload progress: ${progress}%, Speed: ${speed.toFixed(2)} MB/s`);
@@ -222,6 +237,7 @@ function handleUploadProgress() {
   });
 }
 
+// Handle successful upload events
 function handleUploadSuccess() {
   window.api.onUploadSuccess((event, fileInfo) => {
     console.log('File uploaded successfully:', fileInfo.name);
@@ -232,26 +248,7 @@ function handleUploadSuccess() {
   });
 }
 
-function handleUploadError() {
-    window.api.onUploadError((event, errorMessage) => {
-        console.error(`Upload error: ${errorMessage}`);
-        createNotification(`Upload error: ${errorMessage}`, 'danger');
-
-        filesToUpload.splice(currentUploadIndex, 1);
-
-        const fileItems = document.querySelectorAll('.file-item');
-        if (fileItems[currentUploadIndex]) {
-            fileItems[currentUploadIndex].remove();
-        }
-
-        if (currentUploadIndex < filesToUpload.length) {
-            startNextUpload();
-        } else {
-            completeUpload();
-        }
-    });
-}
-
+// Handle upload errors with more robust error handling
 function handleUploadError() {
     window.api.onUploadError((event, errorInfo) => {
         console.error('Upload error:', errorInfo);
@@ -263,7 +260,7 @@ function handleUploadError() {
         createNotification(`Upload failed: ${fileName} - ${errorMessage}`, 'danger');
 
         const failedFileIndex = filesToUpload.findIndex(file =>
-            path.basename(file.path) === fileName
+            file.name === fileName
         );
 
         if (failedFileIndex !== -1) {
@@ -272,6 +269,10 @@ function handleUploadError() {
             const fileItems = document.querySelectorAll('.file-item');
             if (fileItems[failedFileIndex]) {
                 fileItems[failedFileIndex].remove();
+            }
+
+            if (failedFileIndex <= currentUploadIndex) {
+                currentUploadIndex = Math.max(0, currentUploadIndex - 1);
             }
         }
 
@@ -283,6 +284,7 @@ function handleUploadError() {
     });
 }
 
+// Fetch and display uploaded files
 function fetchUploadedFiles() {
   console.log('Fetching uploaded files');
   window.api.listFiles()
@@ -311,6 +313,7 @@ function fetchUploadedFiles() {
     });
 }
 
+// Delete a specific file
 async function handleDeleteFile(fileId) {
   try {
     console.log('Deleting file with ID:', fileId);
@@ -323,6 +326,7 @@ async function handleDeleteFile(fileId) {
   }
 }
 
+// Initialize the application
 function init() {
   console.log('Initializing renderer');
   setupEventListeners();
@@ -332,4 +336,13 @@ function init() {
   fetchUploadedFiles();
 }
 
+// Handle logout and cancel all uploads
+logoutButton.addEventListener('click', () => {
+  filesToUpload.forEach(file => {
+    window.api.cancelUpload(file.path);
+  });
+  window.api.logout();
+});
+
 init();
+
