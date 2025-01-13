@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 
-const API_BASE_URL = 'https://app.staging.scientist.com/api/v2';
+const API_BASE_URL = 'https://app.scientist.com/api/v2';
 const MAX_UPLOAD_SPEED_BPS = 50 * 1000 * 1000;
 
 async function getConcurrencyLimit(fileSize, accessToken) {

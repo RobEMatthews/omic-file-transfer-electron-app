@@ -2,7 +2,7 @@ const axios = require('axios');
 
 async function listFiles(accessToken) {
   try {
-    const response = await axios.get('https://app.staging.scientist.com/api/v2/storage', {
+    const response = await axios.get('https://app.scientist.com/api/v2/storage', {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
     console.log('List Files Response:', response.data);
@@ -15,7 +15,7 @@ async function listFiles(accessToken) {
 
 async function deleteFile(fileId, accessToken) {
   try {
-    const response = await axios.delete(`https://app.staging.scientist.com/api/v2/storage/${fileId}`, {
+    const response = await axios.delete(`https://app.scientist.com/api/v2/storage/${fileId}`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
 

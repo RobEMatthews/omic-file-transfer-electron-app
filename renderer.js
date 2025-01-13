@@ -174,6 +174,7 @@ function startUpload() {
 
   isUploading = true;
   updateUploadButtonState();
+  logoutButton.disabled = true;
   currentUploadIndex = 0;
   startNextUpload();
 }
@@ -219,6 +220,7 @@ function completeUpload() {
     filesToUpload = [];
     fileListItems.innerHTML = '';
     updateUploadButtonState();
+    logoutButton.disabled = false;
     fetchUploadedFiles();
 }
 
@@ -338,9 +340,6 @@ function init() {
 
 // Handle logout and cancel all uploads
 logoutButton.addEventListener('click', () => {
-  filesToUpload.forEach(file => {
-    window.api.cancelUpload(file.path);
-  });
   window.api.logout();
 });
 

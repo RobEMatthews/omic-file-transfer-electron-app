@@ -11,6 +11,15 @@ const TOKEN_STORAGE_PATH = path.join(__dirname, 'tokens.json');
 const uploadControllers = new Map();
 const SERVER_PORT = 3000;
 
+// Register custom protocol for OAuth callback
+app.setAsDefaultProtocolClient('electron-app');
+
+// Dynamically set redirect URI based on environment
+const REDIRECT_URI =
+  process.env.NODE_ENV === 'production'
+    ? 'electron-app://callback'
+    : `http://localhost:${SERVER_PORT}/callback`;
+
 const createWindow = () => {
   const win = new BrowserWindow({
     width: 800,
@@ -27,7 +36,7 @@ const createWindow = () => {
   win.loadURL(authUrl.toString());
 
   win.webContents.on('will-redirect', (event, newUrl) => {
-    if (newUrl.startsWith(`http://localhost:${SERVER_PORT}/callback`)) {
+    if (newUrl.startsWith(REDIRECT_URI)) {
       event.preventDefault();
       handleCallback(newUrl, win);
     }
@@ -38,10 +47,23 @@ const createWindow = () => {
   });
 };
 
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  console.log('Received URL via custom protocol:', url);
+
+  if (url.startsWith('electron-app://callback')) {
+    const code = new URL(url).searchParams.get('code');
+    if (code) {
+      console.log('Authorization Code:', code);
+      exchangeCodeForToken(code, BrowserWindow.getFocusedWindow());
+    }
+  }
+});
+
 const buildAuthUrl = () => {
   const authUrl = new URL(process.env.AUTHORIZATION_URL);
   authUrl.searchParams.append('client_id', process.env.CLIENT_ID);
-  authUrl.searchParams.append('redirect_uri', `http://localhost:${SERVER_PORT}/callback`);
+  authUrl.searchParams.append('redirect_uri', REDIRECT_URI);
   authUrl.searchParams.append('response_type', 'code');
   return authUrl;
 };
@@ -57,7 +79,7 @@ const exchangeCodeForToken = (code, win) => {
   requestData.append('code', code);
   requestData.append('client_id', process.env.CLIENT_ID);
   requestData.append('client_secret', process.env.CLIENT_SECRET);
-  requestData.append('redirect_uri', process.env.REDIRECT_URI);
+  requestData.append('redirect_uri', REDIRECT_URI);
 
   axios.post(process.env.TOKEN_URL, requestData, { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
     .then(response => {
@@ -197,6 +219,7 @@ const handleCancelUpload = (event, filePath) => {
     if (abortController) {
         abortController.abort();
         uploadControllers.delete(filePath);
+	// UI update, mark data
     }
 }
 
@@ -213,17 +236,7 @@ const handleDeleteFile = async (event, fileId) => {
 };
 
 const handleLogout = (event) => {
-  console.log('Logging out and cancelling all uploads');
-
-  uploadControllers.forEach((controller, filePath) => {
-    try {
-      controller.abort();
-    } catch (error) {
-      console.error('Error aborting upload:', error);
-    }
-  });
-  uploadControllers.clear();
-
+  console.log('Logging out');
   const tokenPath = path.join(__dirname, 'tokens.json');
   if (fs.existsSync(tokenPath)) {
     fs.unlinkSync(tokenPath);
@@ -249,7 +262,9 @@ const handleLogout = (event) => {
 };
 
 app.whenReady().then(() => {
-  startExpressServer();
+  if (process.env.NODE_ENV !== 'production') {
+    startExpressServer();
+  }
 
   const tokens = loadTokens();
   if (tokens && isAccessTokenValid(tokens)) {
