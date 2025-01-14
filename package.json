@@ -4,7 +4,11 @@
   "description": "Enables users to transfer large files securely.",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "package-mac": "electron-packager . omic-file-transfer --platform=darwin --arch=x64 --out=dist --overwrite",
+    "package-win": "electron-packager . omic-file-transfer --platform=win32 --arch=x64 --out=dist --overwrite",
+    "package-linux": "electron-packager . omic-file-transfer --platform=linux --arch=x64 --out=dist --overwrite",
+    "build": "npm run package-mac && npm run package-win && npm run package-linux"
   },
   "repository": {
     "type": "git",
@@ -17,7 +21,8 @@
   },
   "homepage": "https://github.com/assaydepot/omic-file-transfer-electron-app#readme",
   "devDependencies": {
-    "electron": "^31.2.1"
+    "electron": "^31.2.1",
+    "electron-packager": "^17.1.2"
   },
   "dependencies": {
     "aws-sdk": "^2.1663.0",
