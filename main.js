@@ -3,25 +3,37 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
-const express = require('express');
 const uploadFile = require('./uploadFile');
 const { listFiles, deleteFile } = require('./fileManager');
 
+// Constants
 const TOKEN_STORAGE_PATH = path.join(__dirname, 'tokens.json');
+const PROTOCOL = 'electron-app';
+const REDIRECT_URI = `${PROTOCOL}://callback`;
 const uploadControllers = new Map();
-const SERVER_PORT = 3000;
+let isLoginInProgress = false;
 
-// Register custom protocol for OAuth callback
-app.setAsDefaultProtocolClient('electron-app');
+// Register protocol handler based on environment
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
+  }
+} else {
+  app.setAsDefaultProtocolClient(PROTOCOL);
+}
 
-// Dynamically set redirect URI based on environment
-const REDIRECT_URI =
-  process.env.NODE_ENV === 'production'
-    ? 'electron-app://callback'
-    : `http://localhost:${SERVER_PORT}/callback`;
+// Ensure single instance
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+  return;
+}
+
+// Window management
+let mainWindow = null;
 
 const createWindow = () => {
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 800,
     height: 600,
     webPreferences: {
@@ -32,34 +44,14 @@ const createWindow = () => {
   });
 
   const authUrl = buildAuthUrl();
-  console.log('Authorization URL:', authUrl.toString());
-  win.loadURL(authUrl.toString());
+  mainWindow.loadURL(authUrl.toString());
 
-  win.webContents.on('will-redirect', (event, newUrl) => {
-    if (newUrl.startsWith(REDIRECT_URI)) {
-      event.preventDefault();
-      handleCallback(newUrl, win);
-    }
-  });
-
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
+  mainWindow.on('closed', () => {
+    mainWindow = null;
   });
 };
 
-app.on('open-url', (event, url) => {
-  event.preventDefault();
-  console.log('Received URL via custom protocol:', url);
-
-  if (url.startsWith('electron-app://callback')) {
-    const code = new URL(url).searchParams.get('code');
-    if (code) {
-      console.log('Authorization Code:', code);
-      exchangeCodeForToken(code, BrowserWindow.getFocusedWindow());
-    }
-  }
-});
-
+// OAuth URL builder
 const buildAuthUrl = () => {
   const authUrl = new URL(process.env.AUTHORIZATION_URL);
   authUrl.searchParams.append('client_id', process.env.CLIENT_ID);
@@ -68,208 +60,176 @@ const buildAuthUrl = () => {
   return authUrl;
 };
 
-const handleCallback = (callbackUrl, win) => {
-  const code = new URL(callbackUrl).searchParams.get('code');
-  if (code) exchangeCodeForToken(code, win);
-};
-
-const exchangeCodeForToken = (code, win) => {
-  const requestData = new URLSearchParams();
-  requestData.append('grant_type', 'authorization_code');
-  requestData.append('code', code);
-  requestData.append('client_id', process.env.CLIENT_ID);
-  requestData.append('client_secret', process.env.CLIENT_SECRET);
-  requestData.append('redirect_uri', REDIRECT_URI);
-
-  axios.post(process.env.TOKEN_URL, requestData, { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
-    .then(response => {
-      console.log('Token Response:', response.data);
-      const { access_token, refresh_token, expires_in } = response.data;
-      storeTokens(access_token, refresh_token, expires_in);
-      win.loadFile('index.html');
-    })
-    .catch(error => {
-      console.error('Error in token request:', error.response ? error.response.data : error.message);
-      handleError(error);
-    });
-};
-
+// Token management
 const storeTokens = (accessToken, refreshToken, expiresIn) => {
-  const expiryTime = Date.now() + (expiresIn ? expiresIn * 1000 : 3600 * 1000);
-  const tokens = { accessToken, refreshToken, expiryTime };
-  fs.writeFileSync(TOKEN_STORAGE_PATH, JSON.stringify(tokens), 'utf8');
-  console.log('Tokens stored locally.');
+  try {
+    const expiryTime = Date.now() + (expiresIn ? expiresIn * 1000 : 3600 * 1000);
+    const tokens = { accessToken, refreshToken, expiryTime };
+    fs.writeFileSync(TOKEN_STORAGE_PATH, JSON.stringify(tokens), 'utf8');
+  } catch (error) {
+    console.error('Failed to store tokens:', error);
+    throw error;
+  }
 };
 
 const loadTokens = () => {
-  if (fs.existsSync(TOKEN_STORAGE_PATH)) {
-    const tokens = JSON.parse(fs.readFileSync(TOKEN_STORAGE_PATH, 'utf8'));
-    console.log('Loaded Tokens:', tokens);
-    return tokens;
+  try {
+    if (fs.existsSync(TOKEN_STORAGE_PATH)) {
+      return JSON.parse(fs.readFileSync(TOKEN_STORAGE_PATH, 'utf8'));
+    }
+    return null;
+  } catch (error) {
+    console.error('Failed to load tokens:', error);
+    return null;
   }
-  console.log('No tokens found.');
-  return null;
 };
 
 const isAccessTokenValid = (tokens) => {
-  const isValid = tokens && tokens.expiryTime && Date.now() < tokens.expiryTime;
-  console.log('Access Token Valid:', isValid);
-  return isValid;
+  return tokens?.expiryTime && Date.now() < tokens.expiryTime;
 };
 
-const refreshAccessToken = (refreshToken, win) => {
-  console.log('Attempting to refresh access token.');
-  axios.post(process.env.TOKEN_URL, {
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-    client_id: process.env.CLIENT_ID,
-    client_secret: process.env.CLIENT_SECRET
-  })
-    .then(response => {
-      console.log('New Access Token:', response.data.access_token);
-      storeTokens(response.data.access_token, response.data.refresh_token, response.data.expires_in);
-      win.loadFile('index.html');
-    })
-    .catch(error => {
-      console.error('Failed to refresh token:', error);
-      createWindow();
+// Token refresh
+const refreshAccessToken = async (refreshToken) => {
+  try {
+    const response = await axios.post(process.env.TOKEN_URL, {
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: process.env.CLIENT_ID,
+      client_secret: process.env.CLIENT_SECRET
     });
-};
 
-const handleError = (error) => {
-  if (error.response) {
-    console.error('Error response:', error.response.data);
-  } else if (error.request) {
-    console.error('No response received:', error.request);
-  } else {
-    console.error('Error setting up request:', error.message);
+    const { access_token, refresh_token, expires_in } = response.data;
+    storeTokens(access_token, refresh_token, expires_in);
+    return access_token;
+  } catch (error) {
+    console.error('Failed to refresh token:', error);
+    throw error;
   }
 };
 
-const startExpressServer = () => {
-  const serverApp = express();
+// OAuth callback handling
+const handleCallback = async (url) => {
+  try {
+    const urlObj = new URL(url);
+    const code = urlObj.searchParams.get('code');
+    if (!code) throw new Error('No authorization code received');
 
-  serverApp.get('/callback', (req, res) => {
-    const code = req.query.code;
-    if (code) {
-      console.log('Authorization Code:', code);
-      res.redirect('/');
-    } else {
-      res.send('Authorization failed. No code received.');
-    }
-  });
+    const requestData = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      client_id: process.env.CLIENT_ID,
+      client_secret: process.env.CLIENT_SECRET,
+      redirect_uri: REDIRECT_URI
+    });
 
-  serverApp.listen(SERVER_PORT, () => {
-    console.log(`Server listening at http://localhost:${SERVER_PORT}`);
-  });
+    const response = await axios.post(process.env.TOKEN_URL, requestData, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    });
+
+    const { access_token, refresh_token, expires_in } = response.data;
+    storeTokens(access_token, refresh_token, expires_in);
+    mainWindow?.loadFile('index.html');
+  } catch (error) {
+    console.error('Token exchange failed:', error);
+    mainWindow?.loadFile('error.html');
+  }
 };
 
-let isLoginInProgress = false; 
-
-const handleUploadFile = (event, filePath) => {
-    try {
-        const tokens = loadTokens();
-        if (!tokens || !isAccessTokenValid(tokens)) {
-            if (tokens && tokens.refreshToken) {
-                console.log('Access token expired. Attempting to refresh...');
-                if (!isLoginInProgress) { 
-                    isLoginInProgress = true;
-                    return refreshAccessToken(tokens.refreshToken, BrowserWindow.getFocusedWindow())
-                        .then(() => {
-                            isLoginInProgress = false; 
-                            handleUploadFile(event, filePath);
-                        })
-                        .catch(error => {
-                            console.error('Failed to refresh token:', error);
-                            event.reply('upload-error', 'Failed to refresh token. Please log in again.');
-                            handleLogout(event);
-                            isLoginInProgress = false; 
-                        });
-                } else {
-                    console.log('Login process already in progress. Skipping additional login attempts.');
-                    return;
-                }
-            }
-            throw new Error('Invalid or expired token');
+// File upload handling
+const handleUploadFile = async (event, filePath) => {
+  try {
+    const tokens = loadTokens();
+    if (!tokens || !isAccessTokenValid(tokens)) {
+      if (tokens?.refreshToken && !isLoginInProgress) {
+        isLoginInProgress = true;
+        try {
+          await refreshAccessToken(tokens.refreshToken);
+          isLoginInProgress = false;
+          return handleUploadFile(event, filePath);
+        } catch (error) {
+          isLoginInProgress = false;
+          event.reply('upload-error', 'Failed to refresh token. Please log in again.');
+          return handleLogout();
         }
-
-	const existingController = uploadControllers.get(filePath);
-        if (existingController) {
-            existingController.abort();
-            uploadControllers.delete(filePath);
-        }
-
-        const abortController = new AbortController();
-        uploadControllers.set(filePath, abortController);
-        
-	uploadFile(filePath, event, abortController, tokens.accessToken).catch(error => {
-            console.error('Upload failed:', error);
-            event.reply('upload-error', error.message || 'Upload failed');
-        }).finally(() => {
-            uploadControllers.delete(filePath);
-        });
-    } catch (error) {
-        console.error('Upload preparation error:', error);
-        event.reply('upload-error', error.message);
+      }
+      throw new Error('Invalid or expired token');
     }
+
+    const existingController = uploadControllers.get(filePath);
+    if (existingController) {
+      existingController.abort();
+      uploadControllers.delete(filePath);
+    }
+
+    const abortController = new AbortController();
+    uploadControllers.set(filePath, abortController);
+
+    await uploadFile(filePath, event, abortController, tokens.accessToken);
+    uploadControllers.delete(filePath);
+  } catch (error) {
+    console.error('Upload failed:', error);
+    event.reply('upload-error', error.message || 'Upload failed');
+    uploadControllers.delete(filePath);
+  }
 };
 
-const handleCancelUpload = (event, filePath) => {
-    const abortController = uploadControllers.get(filePath);
-    if (abortController) {
-        abortController.abort();
-        uploadControllers.delete(filePath);
-	// UI update, mark data
-    }
-}
-
+// File management handlers
 const handleListFiles = async () => {
   const tokens = loadTokens();
-  if (!tokens || !isAccessTokenValid(tokens)) throw new Error('Invalid or expired token');
+  if (!tokens || !isAccessTokenValid(tokens)) {
+    throw new Error('Invalid or expired token');
+  }
   return await listFiles(tokens.accessToken);
 };
 
 const handleDeleteFile = async (event, fileId) => {
   const tokens = loadTokens();
-  if (!tokens || !isAccessTokenValid(tokens)) throw new Error('Invalid or expired token');
+  if (!tokens || !isAccessTokenValid(tokens)) {
+    throw new Error('Invalid or expired token');
+  }
   return await deleteFile(fileId, tokens.accessToken);
 };
 
-const handleLogout = (event) => {
-  console.log('Logging out');
-  const tokenPath = path.join(__dirname, 'tokens.json');
-  if (fs.existsSync(tokenPath)) {
-    fs.unlinkSync(tokenPath);
-    console.log('Tokens cleared.');
+const handleCancelUpload = (event, filePath) => {
+  const controller = uploadControllers.get(filePath);
+  if (controller) {
+    controller.abort();
+    uploadControllers.delete(filePath);
   }
+};
 
-  const win = BrowserWindow.getFocusedWindow();
-  if (win && !win.isDestroyed()) {
-    win.webContents.session.clearStorageData().then(() => {
-      console.log('Session storage cleared.');
-      win.close();
+// Logout handling
+const handleLogout = () => {
+  try {
+    if (fs.existsSync(TOKEN_STORAGE_PATH)) {
+      fs.unlinkSync(TOKEN_STORAGE_PATH);
+    }
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.session.clearStorageData()
+        .then(() => {
+          mainWindow.close();
+          createWindow();
+        })
+        .catch(error => {
+          console.error('Error clearing session:', error);
+          mainWindow.close();
+          createWindow();
+        });
+    } else {
       createWindow();
-    }).catch(error => {
-      console.error('Error clearing session data:', error);
-      if (!win.isDestroyed()) {
-	win.close();
-        createWindow();
-      }
-    });
-  } else {
+    }
+  } catch (error) {
+    console.error('Logout failed:', error);
     createWindow();
   }
 };
 
-app.whenReady().then(() => {
-  if (process.env.NODE_ENV !== 'production') {
-    startExpressServer();
-  }
-
+// App event handlers
+app.on('ready', () => {
   const tokens = loadTokens();
   if (tokens && isAccessTokenValid(tokens)) {
-    console.log('Using stored access token.');
-    const win = new BrowserWindow({
+    mainWindow = new BrowserWindow({
       width: 800,
       height: 600,
       webPreferences: {
@@ -278,22 +238,61 @@ app.whenReady().then(() => {
         contextIsolation: true,
       },
     });
-    win.loadFile('index.html');
-  } else if (tokens && tokens.refreshToken) {
-    refreshAccessToken(tokens.refreshToken);
+    mainWindow.loadFile('index.html');
+  } else if (tokens?.refreshToken) {
+    refreshAccessToken(tokens.refreshToken)
+      .then(() => {
+        mainWindow = new BrowserWindow({
+          width: 800,
+          height: 600,
+          webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            nodeIntegration: false,
+            contextIsolation: true,
+          },
+        });
+        mainWindow.loadFile('index.html');
+      })
+      .catch(() => createWindow());
   } else {
     createWindow();
   }
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
 });
 
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
 
+app.on('activate', () => {
+  if (mainWindow === null) {
+    createWindow();
+  }
+});
+
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleCallback(url);
+});
+
+app.on('second-instance', (event, commandLine) => {
+  const url = commandLine.pop();
+  if (url.startsWith(`${PROTOCOL}://`)) {
+    handleCallback(url);
+  }
+
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
+// IPC handlers
 ipcMain.on('upload-file', handleUploadFile);
 ipcMain.on('cancel-upload', handleCancelUpload);
 ipcMain.handle('list-files', handleListFiles);
 ipcMain.handle('delete-file', handleDeleteFile);
 ipcMain.on('logout', handleLogout);
 
+module.exports = app;

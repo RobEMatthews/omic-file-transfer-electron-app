@@ -155,7 +155,7 @@ function setupEventListeners() {
         const files = Array.from(fileInput.files).filter(file => {
             const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
             if (file.size > MAX_FILE_SIZE) {
-                createNotification(`${file.name} exceeds 100 MB limit`, 'warning');
+                createNotification(`${file.name} exceeds 10 GB limit`, 'warning');
                 return false;
             }
             return true;
