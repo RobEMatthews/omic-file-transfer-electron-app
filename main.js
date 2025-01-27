@@ -1,298 +1,209 @@
-require('dotenv').config();
-const { app, BrowserWindow, ipcMain } = require('electron');
-const path = require('path');
-const fs = require('fs');
-const axios = require('axios');
-const uploadFile = require('./uploadFile');
-const { listFiles, deleteFile } = require('./fileManager');
+require("dotenv").config();
+const { app, BrowserWindow, ipcMain } = require("electron");
+const path = require("path");
+const AuthManager = require("./authManager");
+const UploadManager = require("./uploadManager");
+const FileManager = require("./fileManager");
 
-// Constants
-const TOKEN_STORAGE_PATH = path.join(__dirname, 'tokens.json');
-const PROTOCOL = 'electron-app';
-const REDIRECT_URI = `${PROTOCOL}://callback`;
-const uploadControllers = new Map();
-let isLoginInProgress = false;
-
-// Register protocol handler based on environment
-if (process.defaultApp) {
-  if (process.argv.length >= 2) {
-    app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
+class Application {
+  constructor() {
+    this.window = null;
+    this.authManager = new AuthManager();
+    this.uploadManager = new UploadManager();
+    this.fileManager = new FileManager();
+    this.setupProtocol();
+    this.setupSingleInstance();
   }
-} else {
-  app.setAsDefaultProtocolClient(PROTOCOL);
-}
 
-// Ensure single instance
-const gotTheLock = app.requestSingleInstanceLock();
-if (!gotTheLock) {
-  app.quit();
-  return;
-}
-
-// Window management
-let mainWindow = null;
-
-const createWindow = () => {
-  mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: false,
-      contextIsolation: true,
-    },
-  });
-
-  const authUrl = buildAuthUrl();
-  mainWindow.loadURL(authUrl.toString());
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
-};
-
-// OAuth URL builder
-const buildAuthUrl = () => {
-  const authUrl = new URL(process.env.AUTHORIZATION_URL);
-  authUrl.searchParams.append('client_id', process.env.CLIENT_ID);
-  authUrl.searchParams.append('redirect_uri', REDIRECT_URI);
-  authUrl.searchParams.append('response_type', 'code');
-  return authUrl;
-};
-
-// Token management
-const storeTokens = (accessToken, refreshToken, expiresIn) => {
-  try {
-    const expiryTime = Date.now() + (expiresIn ? expiresIn * 1000 : 3600 * 1000);
-    const tokens = { accessToken, refreshToken, expiryTime };
-    fs.writeFileSync(TOKEN_STORAGE_PATH, JSON.stringify(tokens), 'utf8');
-  } catch (error) {
-    console.error('Failed to store tokens:', error);
-    throw error;
-  }
-};
-
-const loadTokens = () => {
-  try {
-    if (fs.existsSync(TOKEN_STORAGE_PATH)) {
-      return JSON.parse(fs.readFileSync(TOKEN_STORAGE_PATH, 'utf8'));
-    }
-    return null;
-  } catch (error) {
-    console.error('Failed to load tokens:', error);
-    return null;
-  }
-};
-
-const isAccessTokenValid = (tokens) => {
-  return tokens?.expiryTime && Date.now() < tokens.expiryTime;
-};
-
-// Token refresh
-const refreshAccessToken = async (refreshToken) => {
-  try {
-    const response = await axios.post(process.env.TOKEN_URL, {
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-      client_id: process.env.CLIENT_ID,
-      client_secret: process.env.CLIENT_SECRET
-    });
-
-    const { access_token, refresh_token, expires_in } = response.data;
-    storeTokens(access_token, refresh_token, expires_in);
-    return access_token;
-  } catch (error) {
-    console.error('Failed to refresh token:', error);
-    throw error;
-  }
-};
-
-// OAuth callback handling
-const handleCallback = async (url) => {
-  try {
-    const urlObj = new URL(url);
-    const code = urlObj.searchParams.get('code');
-    if (!code) throw new Error('No authorization code received');
-
-    const requestData = new URLSearchParams({
-      grant_type: 'authorization_code',
-      code,
-      client_id: process.env.CLIENT_ID,
-      client_secret: process.env.CLIENT_SECRET,
-      redirect_uri: REDIRECT_URI
-    });
-
-    const response = await axios.post(process.env.TOKEN_URL, requestData, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-    });
-
-    const { access_token, refresh_token, expires_in } = response.data;
-    storeTokens(access_token, refresh_token, expires_in);
-    mainWindow?.loadFile('index.html');
-  } catch (error) {
-    console.error('Token exchange failed:', error);
-    mainWindow?.loadFile('error.html');
-  }
-};
-
-// File upload handling
-const handleUploadFile = async (event, filePath) => {
-  try {
-    const tokens = loadTokens();
-    if (!tokens || !isAccessTokenValid(tokens)) {
-      if (tokens?.refreshToken && !isLoginInProgress) {
-        isLoginInProgress = true;
-        try {
-          await refreshAccessToken(tokens.refreshToken);
-          isLoginInProgress = false;
-          return handleUploadFile(event, filePath);
-        } catch (error) {
-          isLoginInProgress = false;
-          event.reply('upload-error', 'Failed to refresh token. Please log in again.');
-          return handleLogout();
-        }
+  setupProtocol() {
+    if (process.defaultApp) {
+      if (process.argv.length >= 2) {
+        app.setAsDefaultProtocolClient("electron-app", process.execPath, [
+          path.resolve(process.argv[1]),
+        ]);
       }
-      throw new Error('Invalid or expired token');
-    }
-
-    const existingController = uploadControllers.get(filePath);
-    if (existingController) {
-      existingController.abort();
-      uploadControllers.delete(filePath);
-    }
-
-    const abortController = new AbortController();
-    uploadControllers.set(filePath, abortController);
-
-    await uploadFile(filePath, event, abortController, tokens.accessToken);
-    uploadControllers.delete(filePath);
-  } catch (error) {
-    console.error('Upload failed:', error);
-    event.reply('upload-error', error.message || 'Upload failed');
-    uploadControllers.delete(filePath);
-  }
-};
-
-// File management handlers
-const handleListFiles = async () => {
-  const tokens = loadTokens();
-  if (!tokens || !isAccessTokenValid(tokens)) {
-    throw new Error('Invalid or expired token');
-  }
-  return await listFiles(tokens.accessToken);
-};
-
-const handleDeleteFile = async (event, fileId) => {
-  const tokens = loadTokens();
-  if (!tokens || !isAccessTokenValid(tokens)) {
-    throw new Error('Invalid or expired token');
-  }
-  return await deleteFile(fileId, tokens.accessToken);
-};
-
-const handleCancelUpload = (event, filePath) => {
-  const controller = uploadControllers.get(filePath);
-  if (controller) {
-    controller.abort();
-    uploadControllers.delete(filePath);
-  }
-};
-
-// Logout handling
-const handleLogout = () => {
-  try {
-    if (fs.existsSync(TOKEN_STORAGE_PATH)) {
-      fs.unlinkSync(TOKEN_STORAGE_PATH);
-    }
-
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.session.clearStorageData()
-        .then(() => {
-          mainWindow.close();
-          createWindow();
-        })
-        .catch(error => {
-          console.error('Error clearing session:', error);
-          mainWindow.close();
-          createWindow();
-        });
     } else {
-      createWindow();
+      app.setAsDefaultProtocolClient("electron-app");
     }
-  } catch (error) {
-    console.error('Logout failed:', error);
-    createWindow();
   }
-};
 
-// App event handlers
-app.on('ready', () => {
-  const tokens = loadTokens();
-  if (tokens && isAccessTokenValid(tokens)) {
-    mainWindow = new BrowserWindow({
+  setupSingleInstance() {
+    if (!app.requestSingleInstanceLock()) {
+      app.quit();
+      return;
+    }
+
+    app.on("second-instance", (event, commandLine) => {
+      const url = commandLine.pop();
+      if (url.startsWith("electron-app://")) {
+        this.handleCallback(url);
+      }
+      if (this.window) {
+        if (this.window.isMinimized()) this.window.restore();
+        this.window.focus();
+      }
+    });
+  }
+
+  async initialize() {
+    await app.whenReady();
+    this.setupEventHandlers();
+    this.initializeWindow();
+  }
+
+  setupEventHandlers() {
+    app.on("window-all-closed", () => {
+      if (process.platform !== "darwin") {
+        app.quit();
+      }
+    });
+
+    app.on("activate", () => {
+      if (!this.window) {
+        this.initializeWindow();
+      }
+    });
+
+    app.on("open-url", (event, url) => {
+      event.preventDefault();
+      this.handleCallback(url);
+    });
+
+    this.setupIpcHandlers();
+  }
+
+  setupIpcHandlers() {
+    ipcMain.on("upload-file", async (event, filePath) => {
+      try {
+        const tokens = this.authManager.loadTokens();
+        if (!tokens || !this.authManager.isAccessTokenValid(tokens)) {
+          if (tokens?.refreshToken) {
+            await this.authManager.refreshAccessToken(tokens.refreshToken);
+          } else {
+            throw new Error("Invalid or expired token");
+          }
+        }
+
+        const uploadId = this.uploadManager.addUpload({
+          path: filePath,
+          name: path.basename(filePath),
+        });
+
+        this.uploadManager.setCallbacks({
+          onProgress: (upload) => {
+            event.reply("upload-progress", {
+              progress: upload.progress,
+              speed: upload.speed / (1024 * 1024), // Convert to MB/s
+            });
+          },
+          onSuccess: (upload) => {
+            event.reply("upload-success", {
+              name: upload.file.name,
+              path: upload.file.path,
+            });
+          },
+          onError: (upload, error) => {
+            event.reply("upload-error", {
+              message: error.message,
+              fileName: upload.file.name,
+            });
+          },
+        });
+
+        await this.uploadManager.startUpload(uploadId);
+      } catch (error) {
+        event.reply("upload-error", {
+          message: error.message,
+          fileName: path.basename(filePath),
+        });
+      }
+    });
+
+    ipcMain.on("cancel-upload", (event, filePath) => {
+      const upload = this.uploadManager.uploads.find(
+        (u) => u.file.path === filePath,
+      );
+      if (upload) {
+        this.uploadManager.cancelUpload(upload.id);
+      }
+    });
+
+    ipcMain.handle("list-files", async () => {
+      const tokens = this.authManager.loadTokens();
+      if (!tokens || !this.authManager.isAccessTokenValid(tokens)) {
+        throw new Error("Invalid or expired token");
+      }
+      return this.fileManager.listFiles(tokens.accessToken);
+    });
+
+    ipcMain.handle("delete-file", async (event, fileId) => {
+      const tokens = this.authManager.loadTokens();
+      if (!tokens || !this.authManager.isAccessTokenValid(tokens)) {
+        throw new Error("Invalid or expired token");
+      }
+      return this.fileManager.deleteFile(fileId, tokens.accessToken);
+    });
+
+    ipcMain.on("logout", () => {
+      this.handleLogout();
+    });
+  }
+
+  initializeWindow() {
+    this.window = new BrowserWindow({
       width: 800,
       height: 600,
       webPreferences: {
-        preload: path.join(__dirname, 'preload.js'),
+        preload: path.join(__dirname, "preload.js"),
         nodeIntegration: false,
         contextIsolation: true,
       },
     });
-    mainWindow.loadFile('index.html');
-  } else if (tokens?.refreshToken) {
-    refreshAccessToken(tokens.refreshToken)
-      .then(() => {
-        mainWindow = new BrowserWindow({
-          width: 800,
-          height: 600,
-          webPreferences: {
-            preload: path.join(__dirname, 'preload.js'),
-            nodeIntegration: false,
-            contextIsolation: true,
-          },
+
+    const tokens = this.authManager.loadTokens();
+    if (tokens && this.authManager.isAccessTokenValid(tokens)) {
+      this.window.loadFile("index.html");
+    } else if (tokens?.refreshToken) {
+      this.authManager
+        .refreshAccessToken(tokens.refreshToken)
+        .then(() => this.window.loadFile("index.html"))
+        .catch(() =>
+          this.window.loadURL(this.authManager.buildAuthUrl().toString()),
+        );
+    } else {
+      this.window.loadURL(this.authManager.buildAuthUrl().toString());
+    }
+  }
+
+  async handleCallback(url) {
+    try {
+      await this.authManager.handleCallback(url);
+      this.window?.loadFile("index.html");
+    } catch (error) {
+      console.error("Authentication failed:", error);
+      this.window?.loadFile("error.html");
+    }
+  }
+
+  handleLogout() {
+    this.authManager.logout();
+    if (this.window && !this.window.isDestroyed()) {
+      this.window.webContents.session
+        .clearStorageData()
+        .then(() => {
+          this.window.close();
+          this.initializeWindow();
+        })
+        .catch((error) => {
+          console.error("Error clearing session:", error);
+          this.window.close();
+          this.initializeWindow();
         });
-        mainWindow.loadFile('index.html');
-      })
-      .catch(() => createWindow());
-  } else {
-    createWindow();
+    } else {
+      this.initializeWindow();
+    }
   }
-});
+}
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
-
-app.on('activate', () => {
-  if (mainWindow === null) {
-    createWindow();
-  }
-});
-
-app.on('open-url', (event, url) => {
-  event.preventDefault();
-  handleCallback(url);
-});
-
-app.on('second-instance', (event, commandLine) => {
-  const url = commandLine.pop();
-  if (url.startsWith(`${PROTOCOL}://`)) {
-    handleCallback(url);
-  }
-
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
-  }
-});
-
-// IPC handlers
-ipcMain.on('upload-file', handleUploadFile);
-ipcMain.on('cancel-upload', handleCancelUpload);
-ipcMain.handle('list-files', handleListFiles);
-ipcMain.handle('delete-file', handleDeleteFile);
-ipcMain.on('logout', handleLogout);
-
-module.exports = app;
+const mainApp = new Application();
+mainApp.initialize().catch(console.error);

@@ -1,6 +1,5 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Expose a limited set of functionalities to the renderer process
 contextBridge.exposeInMainWorld('api', {
   uploadFile: (filePath) => ipcRenderer.send('upload-file', filePath),
   cancelUpload: (filePath) => ipcRenderer.send('cancel-upload', filePath),

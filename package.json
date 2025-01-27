@@ -30,5 +30,13 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "ssh2-sftp-client": "^10.0.3"
-  }
+  },
+  "files": [
+    "*.js",
+    "*.html",
+    "*.css",
+    "*.json",
+    ".env",
+    "./.env"
+  ]
 }
