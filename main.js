@@ -1,6 +1,7 @@
 require("dotenv").config();
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
+const http = require("http");
 const AuthManager = require("./authManager");
 const UploadManager = require("./uploadManager");
 const FileManager = require("./fileManager");
@@ -11,142 +12,56 @@ class Application {
     this.authManager = new AuthManager();
     this.uploadManager = new UploadManager();
     this.fileManager = new FileManager();
-    this.setupProtocol();
-    this.setupSingleInstance();
-  }
-
-  setupProtocol() {
-    if (process.defaultApp) {
-      if (process.argv.length >= 2) {
-        app.setAsDefaultProtocolClient("electron-app", process.execPath, [
-          path.resolve(process.argv[1]),
-        ]);
-      }
-    } else {
-      app.setAsDefaultProtocolClient("electron-app");
-    }
-  }
-
-  setupSingleInstance() {
-    if (!app.requestSingleInstanceLock()) {
-      app.quit();
-      return;
-    }
-
-    app.on("second-instance", (event, commandLine) => {
-      const url = commandLine.pop();
-      if (url.startsWith("electron-app://")) {
-        this.handleCallback(url);
-      }
-      if (this.window) {
-        if (this.window.isMinimized()) this.window.restore();
-        this.window.focus();
-      }
-    });
+    this.server = null; // HTTP server for localhost callback
   }
 
   async initialize() {
     await app.whenReady();
     this.setupEventHandlers();
+    this.startLocalServer();
     this.initializeWindow();
   }
 
   setupEventHandlers() {
     app.on("window-all-closed", () => {
-      if (process.platform !== "darwin") {
-        app.quit();
-      }
+      if (process.platform !== "darwin") app.quit();
     });
 
     app.on("activate", () => {
-      if (!this.window) {
-        this.initializeWindow();
-      }
+      if (!this.window) this.initializeWindow();
     });
 
-    app.on("open-url", (event, url) => {
-      event.preventDefault();
-      this.handleCallback(url);
+    app.on("will-quit", () => {
+      if (this.server) this.server.close(() => console.log("Server closed."));
     });
-
-    this.setupIpcHandlers();
   }
 
-  setupIpcHandlers() {
-    ipcMain.on("upload-file", async (event, filePath) => {
-      try {
-        const tokens = this.authManager.loadTokens();
-        if (!tokens || !this.authManager.isAccessTokenValid(tokens)) {
-          if (tokens?.refreshToken) {
-            await this.authManager.refreshAccessToken(tokens.refreshToken);
-          } else {
-            throw new Error("Invalid or expired token");
-          }
+  startLocalServer() {
+    this.server = http.createServer(async (req, res) => {
+      if (req.url.startsWith("/callback")) {
+        const url = `http://localhost:${this.authManager.config.port}${req.url}`;
+        try {
+          await this.authManager.handleCallback(url);
+          res.writeHead(200, { "Content-Type": "text/plain" });
+          res.end("Authentication successful! You can close this window.");
+          if (this.window) this.window.loadFile("index.html");
+        } catch (error) {
+          console.error("Authentication failed:", error);
+          res.writeHead(500, { "Content-Type": "text/plain" });
+          res.end("Authentication failed. Please try again.");
+          if (this.window) this.window.loadFile("error.html");
         }
-
-        const uploadId = this.uploadManager.addUpload({
-          path: filePath,
-          name: path.basename(filePath),
-        });
-
-        this.uploadManager.setCallbacks({
-          onProgress: (upload) => {
-            event.reply("upload-progress", {
-              progress: upload.progress,
-              speed: upload.speed / (1024 * 1024), // Convert to MB/s
-            });
-          },
-          onSuccess: (upload) => {
-            event.reply("upload-success", {
-              name: upload.file.name,
-              path: upload.file.path,
-            });
-          },
-          onError: (upload, error) => {
-            event.reply("upload-error", {
-              message: error.message,
-              fileName: upload.file.name,
-            });
-          },
-        });
-
-        await this.uploadManager.startUpload(uploadId);
-      } catch (error) {
-        event.reply("upload-error", {
-          message: error.message,
-          fileName: path.basename(filePath),
-        });
+      } else {
+        res.writeHead(404);
+        res.end();
       }
     });
 
-    ipcMain.on("cancel-upload", (event, filePath) => {
-      const upload = this.uploadManager.uploads.find(
-        (u) => u.file.path === filePath,
-      );
-      if (upload) {
-        this.uploadManager.cancelUpload(upload.id);
-      }
-    });
+    const port = this.authManager.config.port;
 
-    ipcMain.handle("list-files", async () => {
-      const tokens = this.authManager.loadTokens();
-      if (!tokens || !this.authManager.isAccessTokenValid(tokens)) {
-        throw new Error("Invalid or expired token");
-      }
-      return this.fileManager.listFiles(tokens.accessToken);
-    });
-
-    ipcMain.handle("delete-file", async (event, fileId) => {
-      const tokens = this.authManager.loadTokens();
-      if (!tokens || !this.authManager.isAccessTokenValid(tokens)) {
-        throw new Error("Invalid or expired token");
-      }
-      return this.fileManager.deleteFile(fileId, tokens.accessToken);
-    });
-
-    ipcMain.on("logout", () => {
-      this.handleLogout();
-    });
+    this.server.listen(port, () =>
+      console.log(`Server listening on http://localhost:${port}`),
+    );
   }
 
   initializeWindow() {
@@ -161,6 +76,7 @@ class Application {
     });
 
     const tokens = this.authManager.loadTokens();
+
     if (tokens && this.authManager.isAccessTokenValid(tokens)) {
       this.window.loadFile("index.html");
     } else if (tokens?.refreshToken) {
@@ -178,10 +94,10 @@ class Application {
   async handleCallback(url) {
     try {
       await this.authManager.handleCallback(url);
-      this.window?.loadFile("index.html");
+      if (this.window) this.window.loadFile("index.html");
     } catch (error) {
       console.error("Authentication failed:", error);
-      this.window?.loadFile("error.html");
+      if (this.window) this.window.loadFile("error.html");
     }
   }
 
@@ -202,6 +118,71 @@ class Application {
     } else {
       this.initializeWindow();
     }
+  }
+
+  setupIpcHandlers() {
+    ipcMain.on("upload-file", async (event, filePath) => {
+      try {
+        const tokens = this.authManager.loadTokens();
+        if (!tokens || !this.authManager.isAccessTokenValid(tokens)) {
+          if (tokens?.refreshToken) {
+            await this.authManager.refreshAccessToken(tokens.refreshToken);
+          } else throw new Error("Invalid or expired token");
+        }
+
+        const uploadId = this.uploadManager.addUpload({
+          path: filePath,
+          name: path.basename(filePath),
+        });
+
+        this.uploadManager.setCallbacks({
+          onProgress: (upload) =>
+            event.reply("upload-progress", {
+              progress: upload.progress,
+              speed: upload.speed / (1024 * 1024), // Convert to MB/s
+            }),
+          onSuccess: (upload) =>
+            event.reply("upload-success", {
+              name: upload.file.name,
+              path: upload.file.path,
+            }),
+          onError: (upload, error) =>
+            event.reply("upload-error", {
+              message: error.message,
+              fileName: upload.file.name,
+            }),
+        });
+
+        await this.uploadManager.startUpload(uploadId);
+      } catch (error) {
+        event.reply("upload-error", { message: error.message });
+      }
+    });
+
+    ipcMain.on("cancel-upload", (event, filePath) => {
+      const upload = this.uploadManager.uploads.find(
+        (u) => u.file.path === filePath,
+      );
+      if (upload) this.uploadManager.cancelUpload(upload.id);
+    });
+
+    ipcMain.handle("list-files", async () => {
+      const tokens = this.authManager.loadTokens();
+      if (!tokens || !this.authManager.isAccessTokenValid(tokens)) {
+        throw new Error("Invalid or expired token");
+      }
+      return await this.fileManager.listFiles(tokens.accessToken);
+    });
+
+    ipcMain.handle("delete-file", async (_, fileId) => {
+      const tokens = this.authManager.loadTokens();
+      if (!tokens || !this.authManager.isAccessTokenValid(tokens)) {
+        throw new Error("Invalid or expired token");
+      }
+      return await this.fileManager.deleteFile(fileId, tokens.accessToken);
+    });
+
+    ipcMain.on("logout", () => this.handleLogout());
   }
 }
 
