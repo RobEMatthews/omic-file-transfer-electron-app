@@ -18,6 +18,7 @@ class Application {
   async initialize() {
     await app.whenReady();
     this.setupEventHandlers();
+    this.setupIpcHandlers();
     this.startLocalServer();
     this.initializeWindow();
   }
