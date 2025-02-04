@@ -221,19 +221,35 @@ class Application {
     });
 
     ipcMain.handle("list-files", async () => {
-      const tokens = this.authManager.loadTokens();
-      if (!tokens || !this.authManager.isAccessTokenValid(tokens)) {
-        throw new Error("Invalid or expired token");
+      try {
+        const tokens = this.authManager.loadTokens();
+        if (!tokens || !this.authManager.isAccessTokenValid(tokens)) {
+          await this.handleLogout();
+          throw new Error("Invalid or expired token");
+        }
+        return await this.fileManager.listFiles(tokens.accessToken);
+      } catch (error) {
+        if (error.message === "Invalid or expired token") {
+          await this.handleLogout();
+        }
+        throw error;
       }
-      return await this.fileManager.listFiles(tokens.accessToken);
     });
 
     ipcMain.handle("delete-file", async (_, fileId) => {
-      const tokens = this.authManager.loadTokens();
-      if (!tokens || !this.authManager.isAccessTokenValid(tokens)) {
-        throw new Error("Invalid or expired token");
+      try {
+        const tokens = this.authManager.loadTokens();
+        if (!tokens || !this.authManager.isAccessTokenValid(tokens)) {
+          await this.handleLogout();
+          throw new Error("Invalid or expired token");
+        }
+        return await this.fileManager.deleteFile(fileId, tokens.accessToken);
+      } catch (error) {
+        if (error.message === "Invalid or expired token") {
+          await this.handleLogout();
+        }
+        throw error;
       }
-      return await this.fileManager.deleteFile(fileId, tokens.accessToken);
     });
 
     ipcMain.on("logout", () => this.handleLogout());
