@@ -1,18 +1,23 @@
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
+const log = require("electron-log");
 
 class AuthManager {
   constructor(config) {
     this.config = {
       tokenStoragePath: path.join(__dirname, "tokens.json"),
-      port: 3000, // Localhost port for callback
+      port: null,
       ...config,
     };
-    this.redirectUri = `http://localhost:${this.config.port}/callback`;
+    this.redirectUri = null;
   }
 
   buildAuthUrl() {
+    if (!this.redirectUri) {
+      throw new Error("Redirect URI not initialized");
+    }
+
     const authUrl = new URL(process.env.AUTHORIZATION_URL);
     authUrl.searchParams.append("client_id", process.env.CLIENT_ID);
     authUrl.searchParams.append("redirect_uri", this.redirectUri);

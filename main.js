@@ -5,6 +5,7 @@ const http = require("http");
 const AuthManager = require("./authManager");
 const UploadManager = require("./uploadManager");
 const FileManager = require("./fileManager");
+const log = require("electron-log");
 
 class Application {
   constructor() {
@@ -12,15 +13,15 @@ class Application {
     this.authManager = new AuthManager();
     this.uploadManager = new UploadManager();
     this.fileManager = new FileManager();
-    this.server = null; // HTTP server for localhost callback
+    this.server = null;
   }
 
   async initialize() {
     await app.whenReady();
     this.setupEventHandlers();
     this.setupIpcHandlers();
-    this.startLocalServer();
-    this.initializeWindow();
+    await this.ensureServerRunning();
+    await this.initializeWindow();
   }
 
   setupEventHandlers() {
@@ -28,8 +29,8 @@ class Application {
       if (process.platform !== "darwin") app.quit();
     });
 
-    app.on("activate", () => {
-      if (!this.window) this.initializeWindow();
+    app.on("activate", async () => {
+      if (!this.window) await this.initializeWindow();
     });
 
     app.on("will-quit", () => {
@@ -37,10 +38,19 @@ class Application {
     });
   }
 
+  async ensureServerRunning() {
+    if (!this.server || !this.server.listening) {
+      await new Promise((resolve) => {
+        this.startLocalServer();
+        this.server.once("listening", resolve);
+      });
+    }
+  }
+
   startLocalServer() {
     this.server = http.createServer(async (req, res) => {
       if (req.url.startsWith("/callback")) {
-        const url = `http://localhost:${this.authManager.config.port}${req.url}`;
+        const url = `http://localhost:${this.server.address().port}${req.url}`;
         try {
           await this.authManager.handleCallback(url);
           res.writeHead(200, { "Content-Type": "text/plain" });
@@ -50,7 +60,6 @@ class Application {
           console.error("Authentication failed:", error);
           res.writeHead(500, { "Content-Type": "text/plain" });
           res.end("Authentication failed. Please try again.");
-          if (this.window) this.window.loadFile("error.html");
         }
       } else {
         res.writeHead(404);
@@ -58,37 +67,52 @@ class Application {
       }
     });
 
-    const port = this.authManager.config.port;
-
-    this.server.listen(port, () =>
-      console.log(`Server listening on http://localhost:${port}`),
-    );
+    this.server.listen(0, () => {
+      const port = this.server.address().port;
+      console.log(`Auth server listening on port ${port}`);
+      this.authManager.config.port = port;
+      this.authManager.redirectUri = `http://localhost:${port}/callback`;
+    });
   }
 
-  initializeWindow() {
-    this.window = new BrowserWindow({
-      width: 800,
-      height: 600,
-      webPreferences: {
-        preload: path.join(__dirname, "preload.js"),
-        nodeIntegration: false,
-        contextIsolation: true,
-      },
-    });
+  async initializeWindow() {
+    try {
+      await this.ensureServerRunning();
 
-    const tokens = this.authManager.loadTokens();
+      this.window = new BrowserWindow({
+        width: 800,
+        height: 600,
+        webPreferences: {
+          preload: path.join(__dirname, "preload.js"),
+          nodeIntegration: false,
+          contextIsolation: true,
+        },
+      });
 
-    if (tokens && this.authManager.isAccessTokenValid(tokens)) {
-      this.window.loadFile("index.html");
-    } else if (tokens?.refreshToken) {
-      this.authManager
-        .refreshAccessToken(tokens.refreshToken)
-        .then(() => this.window.loadFile("index.html"))
-        .catch(() =>
-          this.window.loadURL(this.authManager.buildAuthUrl().toString()),
-        );
-    } else {
-      this.window.loadURL(this.authManager.buildAuthUrl().toString());
+      const tokens = this.authManager.loadTokens();
+
+      if (tokens && this.authManager.isAccessTokenValid(tokens)) {
+        await this.window.loadFile("index.html");
+      } else if (tokens?.refreshToken) {
+        try {
+          await this.authManager.refreshAccessToken(tokens.refreshToken);
+          await this.window.loadFile("index.html");
+        } catch (error) {
+          console.error("Refresh failed:", error);
+          await this.window.loadURL(this.authManager.buildAuthUrl().toString());
+        }
+      } else {
+        const authUrl = this.authManager.buildAuthUrl().toString();
+        await this.window.loadURL(authUrl).catch(async () => {
+          console.log("Retrying auth initialization...");
+          await this.initializeWindow();
+        });
+      }
+    } catch (error) {
+      console.error("Window initialization failed:", error);
+      if (this.window && !this.window.isDestroyed()) {
+        await this.window.loadFile("error.html");
+      }
     }
   }
 
@@ -102,34 +126,43 @@ class Application {
     }
   }
 
-  handleLogout() {
+  async handleLogout() {
     this.authManager.logout();
-    if (this.window && !this.window.isDestroyed()) {
-      this.window.webContents.session
-        .clearStorageData()
-        .then(() => {
-          this.window.close();
-          this.initializeWindow();
-        })
-        .catch((error) => {
-          console.error("Error clearing session:", error);
-          this.window.close();
-          this.initializeWindow();
+
+    if (this.server) {
+      await new Promise((resolve) => {
+        this.server.close(() => {
+          console.log("Server closed during logout");
+          this.server = null;
+          resolve();
         });
-    } else {
-      this.initializeWindow();
+      });
     }
+
+    if (this.window && !this.window.isDestroyed()) {
+      await this.window.webContents.session.clearStorageData();
+      this.window.close();
+    }
+
+    await this.ensureServerRunning();
+    await this.initializeWindow();
   }
 
   setupIpcHandlers() {
     ipcMain.on("upload-file", async (event, filePath) => {
       try {
-        const tokens = this.authManager.loadTokens();
+        let tokens = this.authManager.loadTokens();
+
         if (!tokens || !this.authManager.isAccessTokenValid(tokens)) {
           if (tokens?.refreshToken) {
             await this.authManager.refreshAccessToken(tokens.refreshToken);
-          } else throw new Error("Invalid or expired token");
+            tokens = this.authManager.loadTokens();
+          } else {
+            throw new Error("Invalid or expired token");
+          }
         }
+
+        await this.uploadManager.initialize(tokens.accessToken);
 
         const uploadId = this.uploadManager.addUpload({
           path: filePath,

@@ -1,6 +1,7 @@
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
+const log = require("electron-log");
 
 class UploadManager {
   constructor(config) {
@@ -94,6 +95,7 @@ class UploadManager {
     if (upload && upload.status === "uploading") {
       upload.controller.abort();
       upload.status = "canceled";
+      this._handleError(upload, new Error("Upload canceled"));
     }
   }
 
@@ -110,7 +112,6 @@ class UploadManager {
     const { file } = upload;
     const fileSize = fs.statSync(file.path).size;
 
-    // Initialize multipart upload
     upload.uploadId = await this._initiateMultipartUpload(file.path);
     const totalParts = Math.ceil(fileSize / this.chunkSize);
 

@@ -1,4 +1,5 @@
 const axios = require("axios");
+const log = require("electron-log");
 
 class FileManager {
   constructor(config) {
