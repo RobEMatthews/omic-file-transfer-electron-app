@@ -178,6 +178,7 @@ class Application {
             await this.authManager.refreshAccessToken(tokens.refreshToken);
             tokens = this.authManager.loadTokens();
           } else {
+            await this.handleLogout();
             throw new Error("Invalid or expired token");
           }
         }
@@ -209,6 +210,9 @@ class Application {
 
         await this.uploadManager.startUpload(uploadId);
       } catch (error) {
+        if (error.message === "Invalid or expired token") {
+          await this.handleLogout();
+        }
         event.reply("upload-error", { message: error.message });
       }
     });
