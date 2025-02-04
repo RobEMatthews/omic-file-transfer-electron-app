@@ -77,16 +77,24 @@ class AuthManager {
   }
 
   async refreshAccessToken(refreshToken) {
-    const response = await axios.post(process.env.TOKEN_URL, {
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: process.env.CLIENT_ID,
-      client_secret: process.env.CLIENT_SECRET,
-    });
+    try {
+      const response = await axios.post(process.env.TOKEN_URL, {
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: process.env.CLIENT_ID,
+        client_secret: process.env.CLIENT_SECRET,
+      });
 
-    const { access_token, refresh_token, expires_in } = response.data;
-    this.storeTokens(access_token, refresh_token, expires_in);
-    return access_token;
+      const { access_token, refresh_token, expires_in } = response.data;
+      this.storeTokens(access_token, refresh_token, expires_in);
+      return access_token;
+    } catch (error) {
+      console.error(
+        "Refresh token request failed:",
+        error.response?.data || error.message,
+      );
+      throw error;
+    }
   }
 
   logout() {

@@ -16,8 +16,25 @@ class Application {
     this.server = null;
   }
 
+  createWindow() {
+    this.window = new BrowserWindow({
+      width: 800,
+      height: 600,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        preload: path.join(__dirname, "preload.js"),
+      },
+    });
+
+    this.window.on("closed", () => {
+      this.window = null;
+    });
+  }
+
   async initialize() {
     await app.whenReady();
+    this.createWindow();
     this.setupEventHandlers();
     this.setupIpcHandlers();
     await this.ensureServerRunning();
@@ -30,7 +47,10 @@ class Application {
     });
 
     app.on("activate", async () => {
-      if (!this.window) await this.initializeWindow();
+      if (!this.window) {
+        this.createWindow();
+        await this.initializeWindow();
+      }
     });
 
     app.on("will-quit", () => {
@@ -77,17 +97,9 @@ class Application {
 
   async initializeWindow() {
     try {
-      await this.ensureServerRunning();
-
-      this.window = new BrowserWindow({
-        width: 800,
-        height: 600,
-        webPreferences: {
-          preload: path.join(__dirname, "preload.js"),
-          nodeIntegration: false,
-          contextIsolation: true,
-        },
-      });
+      if (!this.window) {
+        this.createWindow();
+      }
 
       const tokens = this.authManager.loadTokens();
 
@@ -99,7 +111,8 @@ class Application {
           await this.window.loadFile("index.html");
         } catch (error) {
           console.error("Refresh failed:", error);
-          await this.window.loadURL(this.authManager.buildAuthUrl().toString());
+          const authUrl = this.authManager.buildAuthUrl().toString();
+          await this.window.loadURL(authUrl);
         }
       } else {
         const authUrl = this.authManager.buildAuthUrl().toString();
@@ -120,6 +133,13 @@ class Application {
     try {
       await this.authManager.handleCallback(url);
       if (this.window) this.window.loadFile("index.html");
+
+      if (this.server) {
+        this.server.close(() => {
+          console.log("Server stopped after successful authentication.");
+          this.server = null;
+        });
+      }
     } catch (error) {
       console.error("Authentication failed:", error);
       if (this.window) this.window.loadFile("error.html");
@@ -221,4 +241,7 @@ class Application {
 }
 
 const mainApp = new Application();
-mainApp.initialize().catch(console.error);
+mainApp.initialize().catch((error) => {
+  console.error("Failed to initialize application:", error);
+  app.quit();
+});

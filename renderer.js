@@ -166,6 +166,10 @@ class UIManager {
       fileItem.remove();
     }
 
+    if (this.state.isUploading && this.state.filesToUpload.length > 0) {
+      this.startUpload();
+    }
+
     this.updateUploadButtonState();
   }
 
@@ -175,6 +179,14 @@ class UIManager {
     this.state.isUploading = true;
     this.updateUploadButtonState();
     this.elements.logoutButton.disabled = true;
+
+    const firstFile = this.state.filesToUpload[0];
+    const firstFileItem = document.querySelector(
+      `.file-item[data-path="${firstFile.path}"]`,
+    );
+    if (firstFileItem) {
+      firstFileItem.classList.add("uploading");
+    }
 
     this.state.filesToUpload.forEach((file) => {
       window.api.uploadFile(file.path);
@@ -192,6 +204,16 @@ class UIManager {
     this.fetchUploadedFiles();
     this.removeFile({ path: fileInfo.path });
 
+    const nextFile = this.state.filesToUpload[0];
+    if (nextFile) {
+      const nextFileItem = document.querySelector(
+        `.file-item[data-path="${nextFile.path}"]`,
+      );
+      if (nextFileItem) {
+        nextFileItem.classList.add("uploading");
+      }
+    }
+
     if (this.state.filesToUpload.length === 0) {
       this.completeUpload();
     }
@@ -206,6 +228,16 @@ class UIManager {
 
     if (error.fileName) {
       this.removeFile({ path: error.fileName });
+    }
+
+    const nextFile = this.state.filesToUpload[0];
+    if (nextFile) {
+      const nextFileItem = document.querySelector(
+        `.file-item[data-path="${nextFile.path}"]`,
+      );
+      if (nextFileItem) {
+        nextFileItem.classList.add("uploading");
+      }
     }
 
     if (this.state.filesToUpload.length === 0) {
