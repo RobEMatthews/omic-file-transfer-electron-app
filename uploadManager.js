@@ -149,32 +149,41 @@ class UploadManager {
   async _uploadPart(upload, partNumber, fileSize) {
     const { file, controller } = upload;
     const start = (partNumber - 1) * this.chunkSize;
-    const buffer = Buffer.alloc(this.chunkSize);
 
-    const fileHandle = fs.openSync(file.path, "r");
-    const bytesRead = fs.readSync(fileHandle, buffer, 0, this.chunkSize, start);
-    fs.closeSync(fileHandle);
+    let fileHandle;
+    try {
+      fileHandle = await fs.promises.open(file.path, "r");
+      const buffer = Buffer.alloc(this.chunkSize);
+      const { bytesRead } = await fileHandle.read(
+        buffer,
+        0,
+        this.chunkSize,
+        start,
+      );
+      if (bytesRead === 0) return null;
 
-    if (bytesRead === 0) return null;
+      const url = await this._getPresignedUrl(
+        file.path,
+        partNumber,
+        upload.uploadId,
+      );
+      const startTime = Date.now();
 
-    const url = await this._getPresignedUrl(
-      file.path,
-      partNumber,
-      upload.uploadId,
-    );
-    const startTime = Date.now();
+      const response = await axios.put(url, buffer.slice(0, bytesRead), {
+        headers: { "Content-Type": "application/octet-stream" },
+        signal: controller.signal,
+      });
 
-    const response = await axios.put(url, buffer.slice(0, bytesRead), {
-      headers: { "Content-Type": "application/octet-stream" },
-      signal: controller.signal,
-    });
-
-    this._updateProgress(upload, bytesRead, fileSize, startTime);
-
-    return {
-      part_number: partNumber,
-      etag: response.headers.etag,
-    };
+      this._updateProgress(upload, bytesRead, fileSize, startTime);
+      return {
+        part_number: partNumber,
+        etag: response.headers.etag,
+      };
+    } catch (error) {
+      throw error;
+    } finally {
+      if (fileHandle) await fileHandle.close();
+    }
   }
 
   async _getPresignedUrl(filePath, partNumber, uploadId) {
