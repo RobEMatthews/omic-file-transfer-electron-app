@@ -89,7 +89,7 @@ class AuthManager {
       this.storeTokens(access_token, refresh_token, expires_in);
       return access_token;
     } catch (error) {
-      console.error(
+      log.error(
         "Refresh token request failed:",
         error.response?.data || error.message,
       );

@@ -16,7 +16,7 @@ class FileManager {
       });
       return response.data;
     } catch (error) {
-      console.error("Error listing files:", error);
+      log.error("Error listing files:", error);
       throw error;
     }
   }
