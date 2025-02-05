@@ -54,7 +54,7 @@ class Application {
     });
 
     app.on("will-quit", () => {
-      if (this.server) this.server.close(() => console.log("Server closed."));
+      if (this.server) this.server.close(() => log.info("Server closed."));
     });
   }
 
@@ -77,7 +77,7 @@ class Application {
           res.end("Authentication successful! You can close this window.");
           if (this.window) this.window.loadFile("index.html");
         } catch (error) {
-          console.error("Authentication failed:", error);
+          log.error("Authentication failed:", error);
           res.writeHead(500, { "Content-Type": "text/plain" });
           res.end("Authentication failed. Please try again.");
         }
@@ -89,7 +89,7 @@ class Application {
 
     this.server.listen(0, () => {
       const port = this.server.address().port;
-      console.log(`Auth server listening on port ${port}`);
+      log.info(`Auth server listening on port ${port}`);
       this.authManager.config.port = port;
       this.authManager.redirectUri = `http://localhost:${port}/callback`;
     });
@@ -97,7 +97,7 @@ class Application {
 
   async initializeWindow() {
     try {
-      if (!this.window) {
+      if (!this.window || this.window.isDestroyed()) {
         this.createWindow();
       }
 
@@ -110,22 +110,23 @@ class Application {
           await this.authManager.refreshAccessToken(tokens.refreshToken);
           await this.window.loadFile("index.html");
         } catch (error) {
-          console.error("Refresh failed:", error);
+          log.error("Refresh failed:", error);
           const authUrl = this.authManager.buildAuthUrl().toString();
           await this.window.loadURL(authUrl);
         }
       } else {
         const authUrl = this.authManager.buildAuthUrl().toString();
         await this.window.loadURL(authUrl).catch(async () => {
-          console.log("Retrying auth initialization...");
+          log.info("Retrying auth initialization...");
           await this.initializeWindow();
         });
       }
     } catch (error) {
-      console.error("Window initialization failed:", error);
-      if (this.window && !this.window.isDestroyed()) {
-        await this.window.loadFile("error.html");
+      log.error("Window initialization failed:", error);
+      if (this.window || !this.window.isDestroyed()) {
+        this.createWindow();
       }
+      await this.window.loadFile("error.html");
     }
   }
 
@@ -136,12 +137,12 @@ class Application {
 
       if (this.server) {
         this.server.close(() => {
-          console.log("Server stopped after successful authentication.");
+          log.info("Server stopped after successful authentication.");
           this.server = null;
         });
       }
     } catch (error) {
-      console.error("Authentication failed:", error);
+      log.error("Authentication failed:", error);
       if (this.window) this.window.loadFile("error.html");
     }
   }
@@ -152,7 +153,7 @@ class Application {
     if (this.server) {
       await new Promise((resolve) => {
         this.server.close(() => {
-          console.log("Server closed during logout");
+          log.info("Server closed during logout");
           this.server = null;
           resolve();
         });
@@ -161,7 +162,13 @@ class Application {
 
     if (this.window && !this.window.isDestroyed()) {
       await this.window.webContents.session.clearStorageData();
-      this.window.close();
+      await new Promise((resolve) => {
+        this.window.once("closed", () => {
+          this.window = null;
+          resolve();
+        });
+        this.window.close();
+      });
     }
 
     await this.ensureServerRunning();
